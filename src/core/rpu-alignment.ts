@@ -1,4 +1,4 @@
-import { parseLengthPrefixedHevcSample } from './hevc';
+import { parseAnnexBHevcStream, parseLengthPrefixedHevcSample } from './hevc';
 import type { Mp4Sample, Mp4VideoTrack } from './mp4';
 
 export type RpuFrameStatus =
@@ -143,6 +143,44 @@ export function inspectRpuForSeconds(data: Uint8Array, track: Mp4VideoTrack, sec
       timestampUs: sampleTimestampUs(sample, track),
       durationUs: sampleDurationUs(sample, track),
       isSync: sample.isSync,
+      rpuNalUnits: 0,
+      firstRpuNalOffset: null,
+      firstRpuNalSize: null,
+      firstRpuNalHex: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export function inspectRpuAnnexBPacket(data: Uint8Array, seconds: number): RpuFrameSelection {
+  const requestedSeconds = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+  try {
+    const analysis = parseAnnexBHevcStream(data);
+    const firstRpu = analysis.rpuNalUnits[0] ?? null;
+    const firstRpuNalHex = firstRpu
+      ? hexPreview(data.subarray(firstRpu.payloadOffset, firstRpu.payloadOffset + firstRpu.size))
+      : null;
+    return {
+      requestedSeconds,
+      status: analysis.rpuNalUnits.length > 0 ? 'present' : 'missing',
+      sampleIndex: null,
+      timestampUs: Math.round(requestedSeconds * 1_000_000),
+      durationUs: null,
+      isSync: null,
+      rpuNalUnits: analysis.rpuNalUnits.length,
+      firstRpuNalOffset: firstRpu?.payloadOffset ?? null,
+      firstRpuNalSize: firstRpu?.size ?? null,
+      firstRpuNalHex,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      requestedSeconds,
+      status: 'invalid-sample',
+      sampleIndex: null,
+      timestampUs: Math.round(requestedSeconds * 1_000_000),
+      durationUs: null,
+      isSync: null,
       rpuNalUnits: 0,
       firstRpuNalOffset: null,
       firstRpuNalSize: null,

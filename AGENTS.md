@@ -76,6 +76,7 @@ npm run test:rust
 - Benchmark timings on `/bench` are synthetic until the real pipeline is connected. The page already supports selecting and previewing a local video via native `<video>`.
 - `/bench` also has diagnostic raw-frame preview controls: a time slider/seconds input plus Raw luma and PQ SDR approximation modes. Raw luma is the safer way to confirm decoded frames when DV P5 color appears green before RPU reshape is implemented.
 - `/bench` shows selected-time Frame/RPU alignment for parsed samples: sample index, timestamp, RPU count, and first RPU NAL bytes. Large MKV files are still prefix-parsed, so seeks beyond that parsed window report unknown/outside until streaming demux is implemented.
+- When selected time is outside the parsed prefix and ffmpeg.wasm raw preview succeeds, `/bench` also tries a one-packet HEVC copy probe (`hevc_mp4toannexb`) at that time and scans the Annex-B packet for RPU NALs. This is diagnostic fallback, not the final demux strategy.
 - Compact DV metadata ABI is 276 `f32` values with WGSL `vec4` row padding. Keep `src/core/metadata.ts`, `crates/lumabridge_wasm/src/lib.rs`, and `src/gpu/dv-p5-to-sdr.wgsl` aligned.
 - `src/core/gpu-upload.ts` prepares tightly packed `u32` Y/U/V storage-buffer data from I420P10 frames for the current WGSL skeleton; it is not yet wired to a live `GPUDevice`.
 - Rust `parse_rpu_metadata` is currently a placeholder returning identity metadata for valid payloads. Full libdovi/dovi_tool-compatible parsing is still pending.
@@ -99,6 +100,7 @@ npm run test:rust
 - [x] Add selectable timestamp controls for ffmpeg.wasm SDR debug preview frames.
 - [x] Add Raw luma diagnostic preview mode for DV P5 frames before RPU color processing.
 - [x] Add selected-time sample/RPU alignment diagnostics on `/bench`.
+- [x] Add ffmpeg.wasm selected-time HEVC packet RPU probe for prefix-miss diagnostics.
 - [x] Report non-HEVC Matroska tracks as unsupported inputs instead of container parse failures.
 - [ ] Turn ffmpeg.wasm fallback from first-frame diagnostic into a streaming/raw-frame adapter.
 - [ ] Validate real `VideoFrame.format === "I420P10"` and `VideoFrame.colorSpace`.

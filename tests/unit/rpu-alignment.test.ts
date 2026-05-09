@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parseMp4 } from '../../src/core/mp4';
-import { findSampleForSeconds, inspectRpuForSeconds } from '../../src/core/rpu-alignment';
+import { findSampleForSeconds, inspectRpuAnnexBPacket, inspectRpuForSeconds } from '../../src/core/rpu-alignment';
 
 describe('RPU frame alignment', () => {
   const bytes = new Uint8Array(readFileSync('tests/fixtures/dv_p5_short.mp4'));
@@ -25,5 +25,18 @@ describe('RPU frame alignment', () => {
     expect(selection.status).toBe('outside-parsed-samples');
     expect(selection.sampleIndex).toBeNull();
     expect(selection.rpuNalUnits).toBe(0);
+  });
+
+  it('maps ffmpeg-extracted Annex-B packets to RPU diagnostics without parsed sample tables', () => {
+    const selection = inspectRpuAnnexBPacket(new Uint8Array([
+      0, 0, 0, 1, 0x46, 0x01, 0xaa,
+      0, 0, 1, 0x7c, 0x01, 0xbb,
+    ]), 120);
+
+    expect(selection.status).toBe('present');
+    expect(selection.sampleIndex).toBeNull();
+    expect(selection.timestampUs).toBe(120_000_000);
+    expect(selection.rpuNalUnits).toBe(1);
+    expect(selection.firstRpuNalHex).toMatch(/^7c /);
   });
 });

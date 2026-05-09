@@ -1,7 +1,12 @@
 import './styles/app.css';
 import { createSyntheticBenchmark, summarizeBenchmark } from './core/benchmark';
 import { evaluateCapabilities, probeBrowserCapabilities } from './core/capabilities';
-import { probeDecoderAdapters, probeFfmpegWasmAdapter, type DecoderAdapterProbe } from './core/decoder-adapter';
+import {
+  probeDecoderAdapters,
+  probeFfmpegHevcPacket,
+  probeFfmpegWasmAdapter,
+  type DecoderAdapterProbe,
+} from './core/decoder-adapter';
 import { analyzeMp4HevcSamples, parseLengthPrefixedHevcSample } from './core/hevc';
 import { parseMediaFile, type ParsedMediaSource } from './core/media-source';
 import type { Mp4VideoTrack } from './core/mp4';
@@ -12,7 +17,7 @@ import {
   type RawPreviewMode,
   type SdrPreviewImage,
 } from './core/raw-frame';
-import { inspectRpuForSeconds, type RpuFrameSelection } from './core/rpu-alignment';
+import { inspectRpuAnnexBPacket, inspectRpuForSeconds, type RpuFrameSelection } from './core/rpu-alignment';
 import type { DecodedFrameProbe } from './core/webcodecs';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -283,7 +288,9 @@ function renderBench() {
       ? 'unknown'
       : `${(selection.durationUs / 1_000).toFixed(1)} ms`;
     const sample = selection.sampleIndex == null
-      ? 'outside parsed sample window'
+      ? selection.status === 'present' || selection.status === 'missing'
+        ? `ffmpeg packet probe @ ${timestamp}`
+        : 'outside parsed sample window'
       : `#${selection.sampleIndex} @ ${timestamp}, ${duration}, ${selection.isSync ? 'sync' : 'delta'}`;
     const firstNal = selection.firstRpuNalHex
       ? `${selection.firstRpuNalSize} bytes at ${selection.firstRpuNalOffset}: ${selection.firstRpuNalHex}`
@@ -358,6 +365,11 @@ function renderBench() {
     }
     updateFrameRpuMeta(inspectRpuForSeconds(activeParsedSource.bytes, activeTrack, seconds));
   }
+
+  const shouldProbeRpuPacketWithFfmpeg = () => {
+    const status = report.frameRpu?.status;
+    return status === 'outside-parsed-samples' || status === 'invalid-sample';
+  };
 
   const previewModeLabel = (mode: RawPreviewMode) => (mode === 'raw-luma' ? 'Raw luma diagnostic' : 'PQ SDR approximation');
 
@@ -465,6 +477,45 @@ function renderBench() {
         `requested ${formatPreviewSeconds(seekSeconds)}`,
         rawFrame.error ?? ffmpegWasm.error ?? 'Unknown ffmpeg.wasm error',
       ]);
+    }
+
+    if (rawFrame.ok && shouldProbeRpuPacketWithFfmpeg()) {
+      updateFrameRpuMeta({
+        requestedSeconds: seekSeconds,
+        status: 'outside-parsed-samples',
+        sampleIndex: null,
+        timestampUs: null,
+        durationUs: null,
+        isSync: null,
+        rpuNalUnits: 0,
+        firstRpuNalOffset: null,
+        firstRpuNalSize: null,
+        firstRpuNalHex: null,
+        error: 'Parsed prefix does not cover this time; probing selected HEVC packet with ffmpeg.wasm.',
+      });
+      updateReport();
+      const packetProbe = await probeFfmpegHevcPacket(file, { seekSeconds });
+      if (version !== selectionVersion) {
+        isRenderingRawPreview = false;
+        return;
+      }
+      if (packetProbe.ok && packetProbe.data) {
+        updateFrameRpuMeta(inspectRpuAnnexBPacket(packetProbe.data, packetProbe.seekSeconds));
+      } else {
+        updateFrameRpuMeta({
+          requestedSeconds: seekSeconds,
+          status: 'invalid-sample',
+          sampleIndex: null,
+          timestampUs: Math.round(seekSeconds * 1_000_000),
+          durationUs: null,
+          isSync: null,
+          rpuNalUnits: 0,
+          firstRpuNalOffset: null,
+          firstRpuNalSize: null,
+          firstRpuNalHex: null,
+          error: packetProbe.error ?? 'ffmpeg.wasm HEVC packet probe failed.',
+        });
+      }
     }
 
     updateDecodeMeta(report.decoderAdapter);

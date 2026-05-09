@@ -22,6 +22,17 @@ export interface FfmpegRawFrameProbe {
   error: string | null;
 }
 
+export interface FfmpegHevcPacketProbe {
+  attempted: boolean;
+  ok: boolean;
+  elapsedMs: number;
+  seekSeconds: number;
+  inputMode: 'workerfs' | 'memfs' | null;
+  bytes: number | null;
+  data: Uint8Array | null;
+  error: string | null;
+}
+
 export interface FfmpegWasmProbe {
   available: boolean;
   elapsedMs: number;
@@ -231,6 +242,138 @@ async function decodeRawFrameWithFfmpeg(
         // Ignore cleanup errors from WorkerFS.
       }
     }
+  }
+}
+
+async function extractHevcPacketWithFfmpeg(ffmpeg: FFmpeg, file: File, seekSeconds: number, timeoutMs: number): Promise<FfmpegHevcPacketProbe> {
+  const startedAt = performance.now();
+  const safeSeekSeconds = Math.max(0, Number.isFinite(seekSeconds) ? seekSeconds : 0);
+  const outputPath = '/packet.hevc';
+  const mountPoint = '/input';
+  const fileName = safeFileName(file.name);
+  let inputPath = `${mountPoint}/${fileName}`;
+  let inputMode: FfmpegHevcPacketProbe['inputMode'] = 'workerfs';
+  let mounted = false;
+  let copied = false;
+
+  try {
+    try {
+      await ffmpeg.createDir(mountPoint);
+    } catch {
+      // The directory may already exist from a previous probe.
+    }
+
+    try {
+      await ffmpeg.mount(FFFSType.WORKERFS, { files: [file] }, mountPoint);
+      mounted = true;
+    } catch (mountError) {
+      if (file.size > MEMFS_COPY_LIMIT_BYTES) throw mountError;
+      inputMode = 'memfs';
+      inputPath = `/input-${fileName}`;
+      await ffmpeg.writeFile(inputPath, await fetchFile(file));
+      copied = true;
+    }
+
+    const seekArgs = safeSeekSeconds > 0 ? ['-ss', formatSeekSeconds(safeSeekSeconds)] : [];
+    const exitCode = await ffmpeg.exec([
+      '-v',
+      'error',
+      '-y',
+      ...seekArgs,
+      '-i',
+      inputPath,
+      '-map',
+      '0:v:0',
+      '-frames:v',
+      '1',
+      '-c:v',
+      'copy',
+      '-bsf:v',
+      'hevc_mp4toannexb',
+      '-an',
+      '-sn',
+      '-f',
+      'hevc',
+      outputPath,
+    ], timeoutMs);
+
+    if (exitCode !== 0) {
+      return {
+        attempted: true,
+        ok: false,
+        elapsedMs: performance.now() - startedAt,
+        seekSeconds: safeSeekSeconds,
+        inputMode,
+        bytes: null,
+        data: null,
+        error: `ffmpeg exited with code ${exitCode}.`,
+      };
+    }
+
+    const raw = await ffmpeg.readFile(outputPath);
+    const data = typeof raw === 'string' ? new TextEncoder().encode(raw) : raw;
+    return {
+      attempted: true,
+      ok: data.byteLength > 0,
+      elapsedMs: performance.now() - startedAt,
+      seekSeconds: safeSeekSeconds,
+      inputMode,
+      bytes: data.byteLength,
+      data,
+      error: data.byteLength > 0 ? null : 'ffmpeg produced an empty HEVC packet.',
+    };
+  } catch (error) {
+    return {
+      attempted: true,
+      ok: false,
+      elapsedMs: performance.now() - startedAt,
+      seekSeconds: safeSeekSeconds,
+      inputMode,
+      bytes: null,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    try {
+      await ffmpeg.deleteFile(outputPath);
+    } catch {
+      // Output may not exist when extraction fails.
+    }
+    if (copied) {
+      try {
+        await ffmpeg.deleteFile(inputPath);
+      } catch {
+        // Ignore cleanup errors from the wasm FS.
+      }
+    }
+    if (mounted) {
+      try {
+        await ffmpeg.unmount(mountPoint);
+      } catch {
+        // Ignore cleanup errors from WorkerFS.
+      }
+    }
+  }
+}
+
+export async function probeFfmpegHevcPacket(
+  file: File,
+  options: { seekSeconds?: number; timeoutMs?: number } = {},
+): Promise<FfmpegHevcPacketProbe> {
+  try {
+    const ffmpeg = await loadFfmpegWasm();
+    return await extractHevcPacketWithFfmpeg(ffmpeg, file, options.seekSeconds ?? 0, options.timeoutMs ?? 60_000);
+  } catch (error) {
+    return {
+      attempted: true,
+      ok: false,
+      elapsedMs: 0,
+      seekSeconds: Math.max(0, Number.isFinite(options.seekSeconds) ? options.seekSeconds ?? 0 : 0),
+      inputMode: null,
+      bytes: null,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 

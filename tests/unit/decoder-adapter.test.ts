@@ -52,7 +52,10 @@ vi.mock('@ffmpeg/ffmpeg', () => ({
       ffmpegMock.execCalls.push(args);
       return 0;
     }
-    async readFile() {
+    async readFile(path: string) {
+      if (path.endsWith('.hevc')) {
+        return new Uint8Array([0, 0, 0, 1, 0x7c, 0x01, 0xaa]);
+      }
       return new Uint8Array(1920 * 1080 * 3);
     }
     async deleteFile() {
@@ -159,5 +162,20 @@ describe('decoder adapter', () => {
     expect(probe.rawFrame.seekSeconds).toBe(12.5);
     expect(ffmpegMock.execCalls.at(-1)).toEqual(expect.arrayContaining(['-ss', '12.500']));
     expect(ffmpegMock.execCalls.at(-1)).toEqual(expect.arrayContaining(['-pix_fmt', 'yuv420p10le']));
+  });
+
+  it('extracts a selected HEVC packet through ffmpeg.wasm for RPU probing', async () => {
+    const { probeFfmpegHevcPacket } = await import('../../src/core/decoder-adapter');
+    const file = new File([new Uint8Array([1, 2, 3])], 'input.mkv', { type: 'video/matroska' });
+
+    const probe = await probeFfmpegHevcPacket(file, { seekSeconds: 45.25 });
+
+    expect(probe.ok).toBe(true);
+    expect(probe.seekSeconds).toBe(45.25);
+    expect(probe.bytes).toBe(7);
+    expect(ffmpegMock.execCalls.at(-1)).toEqual(expect.arrayContaining(['-ss', '45.250']));
+    expect(ffmpegMock.execCalls.at(-1)).toEqual(expect.arrayContaining(['-c:v', 'copy']));
+    expect(ffmpegMock.execCalls.at(-1)).toEqual(expect.arrayContaining(['-bsf:v', 'hevc_mp4toannexb']));
+    expect(ffmpegMock.execCalls.at(-1)).toEqual(expect.arrayContaining(['-f', 'hevc']));
   });
 });
