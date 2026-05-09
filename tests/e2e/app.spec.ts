@@ -28,8 +28,11 @@ test('benchmark page emits a JSON timing report', async ({ page }) => {
   await expect(page.locator('#video-file')).toBeAttached();
   await expect(page.locator('#bench-video')).toBeVisible();
   await expect(page.locator('#sdr-preview')).toBeVisible();
+  await expect(page.locator('#sdr-preview-time')).toBeVisible();
+  await expect(page.locator('#sdr-preview-seconds')).toBeVisible();
   await expect(page.locator('#sdr-preview-meta')).toContainText('SDR debug preview waiting');
   await expect(page.locator('#ffmpeg-raw-probe')).toBeDisabled();
+  await expect(page.locator('#sdr-preview-time')).toBeDisabled();
   await expect(page.getByRole('rowheader', { name: 'copyTo' })).toBeVisible();
   await expect(page.getByRole('rowheader', { name: 'shaderRender' })).toBeVisible();
   const report = await page.locator('#report-json').textContent();
@@ -48,6 +51,7 @@ test('benchmark page parses a selected MP4 fixture', async ({ page }) => {
   await expect(page.locator('#track-meta')).toContainText('154 total');
   await expect(page.locator('#decode-meta')).not.toContainText('not run');
   await expect(page.locator('#ffmpeg-raw-probe')).toBeVisible();
+  await expect(page.locator('#sdr-preview-time')).toBeVisible();
 
   await expect.poll(async () => {
     const report = await page.locator('#report-json').textContent();
@@ -74,6 +78,7 @@ test('benchmark page parses a selected MKV fixture without MP4 moov failure', as
   await expect(page.locator('#track-meta')).not.toContainText('MP4 moov box not found');
   await expect(page.locator('#decode-meta')).not.toContainText('not run');
   await expect(page.locator('#ffmpeg-raw-probe')).toBeVisible();
+  await expect(page.locator('#sdr-preview-time')).toBeVisible();
 
   const report = await page.locator('#report-json').textContent();
   const parsed = JSON.parse(report ?? '{}');

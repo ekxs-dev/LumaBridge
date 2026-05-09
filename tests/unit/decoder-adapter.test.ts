@@ -1,7 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { probeDecoderAdapters } from '../../src/core/decoder-adapter';
 import type { Mp4VideoTrack } from '../../src/core/mp4';
-import { parseMp4 } from '../../src/core/mp4';
+
+const ffmpegMock = vi.hoisted(() => ({
+  execCalls: [] as string[][],
+}));
 
 vi.mock('../../src/core/webcodecs', () => ({
   decodeFirstFrameFromMp4Track: vi.fn(async () => ({
@@ -45,7 +48,8 @@ vi.mock('@ffmpeg/ffmpeg', () => ({
     async unmount() {
       return true;
     }
-    async exec() {
+    async exec(args: string[]) {
+      ffmpegMock.execCalls.push(args);
       return 0;
     }
     async readFile() {
@@ -66,6 +70,10 @@ vi.mock('@ffmpeg/core?url', () => ({ default: '/mock/ffmpeg-core.js' }));
 vi.mock('@ffmpeg/core/wasm?url', () => ({ default: '/mock/ffmpeg-core.wasm' }));
 
 describe('decoder adapter', () => {
+  beforeEach(() => {
+    ffmpegMock.execCalls.length = 0;
+  });
+
   it('falls back to ffmpeg.wasm availability when WebCodecs cannot produce I420P10', async () => {
     const track: Mp4VideoTrack = {
       id: 1,
@@ -107,5 +115,49 @@ describe('decoder adapter', () => {
     expect(probe.status).toBe('fallback-available');
     expect(probe.fallbackReason).toContain('I420P10');
     expect(probe.ffmpegWasm?.available).toBe(true);
+  });
+
+  it('passes a selected seek time to the ffmpeg.wasm raw-frame probe', async () => {
+    const { probeFfmpegWasmAdapter } = await import('../../src/core/decoder-adapter');
+    const track: Mp4VideoTrack = {
+      id: 1,
+      handlerType: 'vide',
+      timescale: 1000,
+      duration: 40_000,
+      width: 1920,
+      height: 1080,
+      codecType: 'hev1',
+      hevcConfig: {
+        configurationVersion: 1,
+        profileSpace: 0,
+        tierFlag: false,
+        profileIdc: 2,
+        profileCompatibilityFlags: 0,
+        constraintIndicatorFlags: 0,
+        levelIdc: 153,
+        lengthSize: 4,
+        codecString: 'hev1.2.4.L153.B0',
+        description: new Uint8Array([1]),
+      },
+      hasDolbyVisionConfig: true,
+      sampleCount: 1,
+      samples: [{
+        index: 0,
+        offset: 0,
+        size: 0,
+        dts: 0,
+        cts: 0,
+        duration: 40,
+        isSync: true,
+      }],
+    };
+    const file = new File([new Uint8Array([1, 2, 3])], 'input.mkv', { type: 'video/matroska' });
+
+    const probe = await probeFfmpegWasmAdapter(file, track, { decodeRawFrame: true, seekSeconds: 12.5 });
+
+    expect(probe.rawFrame.ok).toBe(true);
+    expect(probe.rawFrame.seekSeconds).toBe(12.5);
+    expect(ffmpegMock.execCalls.at(-1)).toEqual(expect.arrayContaining(['-ss', '12.500']));
+    expect(ffmpegMock.execCalls.at(-1)).toEqual(expect.arrayContaining(['-pix_fmt', 'yuv420p10le']));
   });
 });

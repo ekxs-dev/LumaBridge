@@ -13,6 +13,7 @@ export interface FfmpegRawFrameProbe {
   attempted: boolean;
   ok: boolean;
   elapsedMs: number;
+  seekSeconds: number;
   inputMode: 'workerfs' | 'memfs' | null;
   format: 'I420P10' | null;
   bytes: number | null;
@@ -86,6 +87,7 @@ function rawFrameNotAttempted(): FfmpegRawFrameProbe {
     attempted: false,
     ok: false,
     elapsedMs: 0,
+    seekSeconds: 0,
     inputMode: null,
     format: null,
     bytes: null,
@@ -105,8 +107,19 @@ function safeFileName(name: string): string {
   return name.replace(/[\\/]/g, '_') || 'input.mkv';
 }
 
-async function decodeFirstRawFrameWithFfmpeg(ffmpeg: FFmpeg, file: File, track: Mp4VideoTrack, timeoutMs: number): Promise<FfmpegRawFrameProbe> {
+function formatSeekSeconds(value: number): string {
+  return Math.max(0, value).toFixed(3);
+}
+
+async function decodeRawFrameWithFfmpeg(
+  ffmpeg: FFmpeg,
+  file: File,
+  track: Mp4VideoTrack,
+  seekSeconds: number,
+  timeoutMs: number,
+): Promise<FfmpegRawFrameProbe> {
   const startedAt = performance.now();
+  const safeSeekSeconds = Math.max(0, Number.isFinite(seekSeconds) ? seekSeconds : 0);
   const expectedBytes = expectedI420P10Bytes(track);
   const outputPath = '/frame.yuv';
   const mountPoint = '/input';
@@ -134,9 +147,12 @@ async function decodeFirstRawFrameWithFfmpeg(ffmpeg: FFmpeg, file: File, track: 
       copied = true;
     }
 
+    const seekArgs = safeSeekSeconds > 0 ? ['-ss', formatSeekSeconds(safeSeekSeconds)] : [];
     const exitCode = await ffmpeg.exec([
       '-v',
       'error',
+      '-y',
+      ...seekArgs,
       '-i',
       inputPath,
       '-map',
@@ -157,6 +173,7 @@ async function decodeFirstRawFrameWithFfmpeg(ffmpeg: FFmpeg, file: File, track: 
         attempted: true,
         ok: false,
         elapsedMs: performance.now() - startedAt,
+        seekSeconds: safeSeekSeconds,
         inputMode,
         format: null,
         bytes: null,
@@ -173,6 +190,7 @@ async function decodeFirstRawFrameWithFfmpeg(ffmpeg: FFmpeg, file: File, track: 
       attempted: true,
       ok: bytes === expectedBytes,
       elapsedMs: performance.now() - startedAt,
+      seekSeconds: safeSeekSeconds,
       inputMode,
       format: 'I420P10',
       bytes,
@@ -185,6 +203,7 @@ async function decodeFirstRawFrameWithFfmpeg(ffmpeg: FFmpeg, file: File, track: 
       attempted: true,
       ok: false,
       elapsedMs: performance.now() - startedAt,
+      seekSeconds: safeSeekSeconds,
       inputMode,
       format: null,
       bytes: null,
@@ -218,13 +237,13 @@ async function decodeFirstRawFrameWithFfmpeg(ffmpeg: FFmpeg, file: File, track: 
 export async function probeFfmpegWasmAdapter(
   file?: File,
   track?: Mp4VideoTrack,
-  options: { decodeFirstFrame?: boolean; timeoutMs?: number } = {},
+  options: { decodeRawFrame?: boolean; seekSeconds?: number; timeoutMs?: number } = {},
 ): Promise<FfmpegWasmProbe> {
   const startedAt = performance.now();
   try {
     const ffmpeg = await loadFfmpegWasm();
     let mounted = false;
-    if (file && !options.decodeFirstFrame) {
+    if (file && !options.decodeRawFrame) {
       const mountPoint = '/input';
       try {
         await ffmpeg.createDir(mountPoint);
@@ -235,8 +254,8 @@ export async function probeFfmpegWasmAdapter(
       mounted = true;
       await ffmpeg.unmount(mountPoint);
     }
-    const rawFrame = options.decodeFirstFrame && file && track
-      ? await decodeFirstRawFrameWithFfmpeg(ffmpeg, file, track, options.timeoutMs ?? 60_000)
+    const rawFrame = options.decodeRawFrame && file && track
+      ? await decodeRawFrameWithFfmpeg(ffmpeg, file, track, options.seekSeconds ?? 0, options.timeoutMs ?? 60_000)
       : rawFrameNotAttempted();
 
     return {

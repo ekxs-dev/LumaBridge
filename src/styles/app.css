@@ -133,6 +133,38 @@ video {
   margin-top: 18px;
 }
 
+.preview-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 132px;
+  gap: 12px;
+  align-items: end;
+  margin-top: 14px;
+}
+
+.time-slider,
+.seconds-field {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.time-slider input,
+.seconds-field input {
+  width: 100%;
+  min-height: 40px;
+  accent-color: #e84f3d;
+}
+
+.seconds-field input {
+  border: 2px solid #18201f;
+  background: #fffaf0;
+  color: #18201f;
+  padding: 0 10px;
+  font: inherit;
+}
+
 .viewer-meta,
 .bench-topline {
   flex-wrap: wrap;
@@ -251,5 +283,9 @@ pre {
 
   .link-button {
     margin-bottom: 18px;
+  }
+
+  .preview-controls {
+    grid-template-columns: 1fr;
   }
 }

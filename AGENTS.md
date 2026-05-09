@@ -74,6 +74,7 @@ npm run test:rust
 - `ffmpeg.wasm` is not the intended main 4K decode path. Prefer WebCodecs for decode and Rust/WASM for RPU/container support.
 - HDR10/PQ-only behavior is debug/fallback, not a valid DV P5 result.
 - Benchmark timings on `/bench` are synthetic until the real pipeline is connected. The page already supports selecting and previewing a local video via native `<video>`.
+- `/bench` also has a diagnostic SDR preview time slider/seconds input for ffmpeg.wasm raw-frame probes, useful when the first frame is black.
 - Rust `parse_rpu_metadata` is currently a placeholder returning identity metadata for valid payloads. Full libdovi/dovi_tool-compatible parsing is still pending.
 - WGSL currently contains a skeleton/reference compute path, not libplacebo-accurate DV reshaping.
 
@@ -92,6 +93,7 @@ npm run test:rust
 - [x] Add MKV demux support or a WASM-backed MKV adapter.
 - [x] Add WebCodecs-first decoder adapter with ffmpeg.wasm fallback probing.
 - [x] Add automatic ffmpeg.wasm first-frame I420P10 diagnostic decode and SDR debug preview.
+- [x] Add selectable timestamp controls for ffmpeg.wasm SDR debug preview frames.
 - [x] Report non-HEVC Matroska tracks as unsupported inputs instead of container parse failures.
 - [ ] Turn ffmpeg.wasm fallback from first-frame diagnostic into a streaming/raw-frame adapter.
 - [ ] Validate real `VideoFrame.format === "I420P10"` and `VideoFrame.colorSpace`.
