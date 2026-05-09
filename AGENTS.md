@@ -79,7 +79,7 @@ npm run test:rust
 - Benchmark timings on `/bench` are synthetic until the real pipeline is connected. The page already supports selecting and previewing a local video via native `<video>`.
 - `/bench` also has diagnostic raw-frame preview controls: a time slider/seconds input plus Raw luma, DV P5 base approximation, and PQ SDR approximation modes. Raw luma confirms decoded frame structure; DV P5 base approximation interprets the planes as IPT/PQ before RPU reshape; PQ SDR intentionally shows the incorrect HDR10-style path for comparison.
 - `/bench` shows selected-time Frame/RPU alignment for parsed samples: sample index, timestamp, RPU count, and first RPU NAL bytes. Large MKV files are still prefix-parsed, so seeks beyond that parsed window report unknown/outside until streaming demux is implemented.
-- When selected time is outside the parsed prefix and ffmpeg.wasm raw preview succeeds, `/bench` also tries a one-packet HEVC copy probe (`hevc_mp4toannexb`) at that time and scans the Annex-B packet for RPU NALs. This is diagnostic fallback, not the final demux strategy.
+- When selected time is outside the parsed prefix and ffmpeg.wasm raw preview succeeds, `/bench` first tries a one-packet HEVC copy probe (`hevc_mp4toannexb`) at that time, scans the Annex-B packet for RPU NALs, then renders the debug preview with that selected-time RPU metadata when available. This is diagnostic fallback, not the final demux strategy.
 - Compact DV metadata ABI v2 is 840 `f32` values with explicit `reshapeHeader`, padded pivots, per-piece method/order metadata, polynomial slots, and full MMR coefficient slots. Keep `src/core/metadata.ts`, `crates/lumabridge_wasm/src/lib.rs`, and `src/gpu/dv-p5-to-sdr.wgsl` aligned.
 - `src/core/gpu-upload.ts` prepares tightly packed `u32` Y/U/V storage-buffer data plus source/output frame params from I420P10 frames. `/bench` attempts a live WebGPU buffer upload after ffmpeg.wasm raw-frame decode when WebGPU is available.
 - `src/core/rpu-metadata.ts` lazy-loads the generated Rust/WASM parser and converts selected-frame RPU NAL payloads into the 840-f32 compact shader metadata buffer. If parsing fails or no RPU payload is available, `/bench` falls back to identity metadata and reports that explicitly.
@@ -108,6 +108,7 @@ npm run test:rust
 - [x] Add DV P5 base-layer approximation preview mode for greener-than-expected debug frames.
 - [x] Add selected-time sample/RPU alignment diagnostics on `/bench`.
 - [x] Add ffmpeg.wasm selected-time HEVC packet RPU probe for prefix-miss diagnostics.
+- [x] Run prefix-miss HEVC packet RPU probe before WebGPU raw preview rendering so selected-time metadata can be applied.
 - [x] Report non-HEVC Matroska tracks as unsupported inputs instead of container parse failures.
 - [ ] Turn ffmpeg.wasm fallback from first-frame diagnostic into a streaming/raw-frame adapter.
 - [ ] Validate real `VideoFrame.format === "I420P10"` and `VideoFrame.colorSpace`.

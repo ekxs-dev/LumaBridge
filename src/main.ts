@@ -292,13 +292,16 @@ function renderBench() {
     }
   };
 
-  const updateFrameRpuMeta = (selection: RpuFrameSelection | null) => {
+  const updateFrameRpuMeta = (selection: RpuFrameSelection | null, options: { preserveMetadata?: boolean } = {}) => {
     report.frameRpu = selection
       ? {
           ...selection,
           firstRpuPayload: selection.firstRpuPayload ? new Uint8Array(selection.firstRpuPayload) : null,
         }
       : null;
+    if (!options.preserveMetadata) {
+      report.rpuMetadata = null;
+    }
     if (!frameRpuMeta) return;
     if (!selection) {
       frameRpuMeta.innerHTML = `
@@ -557,7 +560,7 @@ function renderBench() {
     const metadata = await parseRpuMetadataForShader(report.frameRpu?.firstRpuPayload ?? null);
     if (version !== selectionVersion) return;
     report.rpuMetadata = metadata.probe;
-    updateFrameRpuMeta(report.frameRpu);
+    updateFrameRpuMeta(report.frameRpu, { preserveMetadata: true });
 
     const gpuRender = await renderI420P10SdrWithWebGpu(gpuUpload, mode, {
       doviMetadata: metadata.probe.ok && metadata.probe.source === 'wasm' ? metadata.packed : undefined,
@@ -605,6 +608,47 @@ function renderBench() {
 
     const rawFrame = ffmpegWasm.rawFrame;
     if (rawFrame.ok && rawFrame.data) {
+      if (shouldProbeRpuPacketWithFfmpeg()) {
+        updateFrameRpuMeta({
+          requestedSeconds: seekSeconds,
+          status: 'outside-parsed-samples',
+          sampleIndex: null,
+          timestampUs: null,
+          durationUs: null,
+          isSync: null,
+          rpuNalUnits: 0,
+          firstRpuNalOffset: null,
+          firstRpuNalSize: null,
+          firstRpuNalHex: null,
+          firstRpuPayload: null,
+          error: 'Parsed prefix does not cover this time; probing selected HEVC packet with ffmpeg.wasm before rendering.',
+        });
+        updateReport();
+        const packetProbe = await probeFfmpegHevcPacket(file, { seekSeconds });
+        if (version !== selectionVersion) {
+          isRenderingRawPreview = false;
+          return;
+        }
+        if (packetProbe.ok && packetProbe.data) {
+          updateFrameRpuMeta(inspectRpuAnnexBPacket(packetProbe.data, packetProbe.seekSeconds));
+        } else {
+          updateFrameRpuMeta({
+            requestedSeconds: seekSeconds,
+            status: 'invalid-sample',
+            sampleIndex: null,
+            timestampUs: Math.round(seekSeconds * 1_000_000),
+            durationUs: null,
+            isSync: null,
+            rpuNalUnits: 0,
+            firstRpuNalOffset: null,
+            firstRpuNalSize: null,
+            firstRpuNalHex: null,
+            firstRpuPayload: null,
+            error: packetProbe.error ?? 'ffmpeg.wasm HEVC packet probe failed.',
+          });
+        }
+      }
+
       await renderRawFrameForCurrentMode(rawFrame.data, track, rawFrame.seekSeconds, rawFrame.elapsedMs, version);
       if (version !== selectionVersion) {
         isRenderingRawPreview = false;
@@ -618,47 +662,6 @@ function renderBench() {
         `requested ${formatPreviewSeconds(seekSeconds)}`,
         rawFrame.error ?? ffmpegWasm.error ?? 'Unknown ffmpeg.wasm error',
       ]);
-    }
-
-    if (rawFrame.ok && shouldProbeRpuPacketWithFfmpeg()) {
-      updateFrameRpuMeta({
-        requestedSeconds: seekSeconds,
-        status: 'outside-parsed-samples',
-        sampleIndex: null,
-        timestampUs: null,
-        durationUs: null,
-        isSync: null,
-        rpuNalUnits: 0,
-        firstRpuNalOffset: null,
-        firstRpuNalSize: null,
-        firstRpuNalHex: null,
-        firstRpuPayload: null,
-        error: 'Parsed prefix does not cover this time; probing selected HEVC packet with ffmpeg.wasm.',
-      });
-      updateReport();
-      const packetProbe = await probeFfmpegHevcPacket(file, { seekSeconds });
-      if (version !== selectionVersion) {
-        isRenderingRawPreview = false;
-        return;
-      }
-      if (packetProbe.ok && packetProbe.data) {
-        updateFrameRpuMeta(inspectRpuAnnexBPacket(packetProbe.data, packetProbe.seekSeconds));
-      } else {
-        updateFrameRpuMeta({
-          requestedSeconds: seekSeconds,
-          status: 'invalid-sample',
-          sampleIndex: null,
-          timestampUs: Math.round(seekSeconds * 1_000_000),
-          durationUs: null,
-          isSync: null,
-          rpuNalUnits: 0,
-          firstRpuNalOffset: null,
-          firstRpuNalSize: null,
-          firstRpuNalHex: null,
-          firstRpuPayload: null,
-          error: packetProbe.error ?? 'ffmpeg.wasm HEVC packet probe failed.',
-        });
-      }
     }
 
     updateDecodeMeta(report.decoderAdapter);
