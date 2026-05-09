@@ -22,7 +22,9 @@ export interface DoviCompactMetadata {
   linearMatrix: number[];
   sourceMinPq: number;
   sourceMaxPq: number;
+  reshapeHeader: [number, number, number, number];
   pivots: number[];
+  pieceMeta: number[];
   polyCoeffs: number[];
   mmrCoeffs: number[];
 }
@@ -32,10 +34,12 @@ export const COMPACT_DOVI_LAYOUT = {
   nonlinearMatrix: 4,
   linearMatrix: 16,
   sourcePq: 28,
-  pivots: 32,
-  polyCoeffs: 60,
-  mmrCoeffs: 132,
-  float32Count: 276,
+  reshapeHeader: 32,
+  pivots: 36,
+  pieceMeta: 72,
+  polyCoeffs: 168,
+  mmrCoeffs: 264,
+  float32Count: 840,
 } as const;
 
 export const COMPACT_DOVI_FLOAT32_COUNT = COMPACT_DOVI_LAYOUT.float32Count;
@@ -55,21 +59,40 @@ export function packCompactDoviMetadata(metadata: DoviCompactMetadata): ArrayBuf
   packVec4Rows(floats, COMPACT_DOVI_LAYOUT.linearMatrix, metadata.linearMatrix, 3, 3);
   floats[COMPACT_DOVI_LAYOUT.sourcePq] = metadata.sourceMinPq;
   floats[COMPACT_DOVI_LAYOUT.sourcePq + 1] = metadata.sourceMaxPq;
-  floats.set(metadata.pivots.slice(0, 28), COMPACT_DOVI_LAYOUT.pivots);
-  floats.set(metadata.polyCoeffs.slice(0, 72), COMPACT_DOVI_LAYOUT.polyCoeffs);
-  floats.set(metadata.mmrCoeffs.slice(0, 144), COMPACT_DOVI_LAYOUT.mmrCoeffs);
+  floats.set(metadata.reshapeHeader, COMPACT_DOVI_LAYOUT.reshapeHeader);
+  floats.set(metadata.pivots.slice(0, 36), COMPACT_DOVI_LAYOUT.pivots);
+  floats.set(metadata.pieceMeta.slice(0, 96), COMPACT_DOVI_LAYOUT.pieceMeta);
+  floats.set(metadata.polyCoeffs.slice(0, 96), COMPACT_DOVI_LAYOUT.polyCoeffs);
+  floats.set(metadata.mmrCoeffs.slice(0, 576), COMPACT_DOVI_LAYOUT.mmrCoeffs);
   return floats.buffer;
 }
 
 export function createIdentityDoviMetadata(): DoviCompactMetadata {
+  const pivots = new Array(36).fill(0);
+  const pieceMeta = new Array(96).fill(0);
+  const polyCoeffs = new Array(96).fill(0);
+  for (let component = 0; component < 3; component += 1) {
+    const pivotBase = component * 12;
+    pivots[pivotBase] = 0;
+    pivots[pivotBase + 1] = 1;
+    const pieceBase = component * 8 * 4;
+    pieceMeta[pieceBase] = 0;
+    pieceMeta[pieceBase + 3] = 1;
+    polyCoeffs[pieceBase] = 0;
+    polyCoeffs[pieceBase + 1] = 1;
+    polyCoeffs[pieceBase + 2] = 0;
+  }
+
   return {
     nonlinearOffset: [0, 0, 0],
     nonlinearMatrix: [1, 0, 0, 0, 1, 0, 0, 0, 1],
     linearMatrix: [1, 0, 0, 0, 1, 0, 0, 0, 1],
     sourceMinPq: 0,
     sourceMaxPq: 1,
-    pivots: [0, 1],
-    polyCoeffs: [0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0],
-    mmrCoeffs: [],
+    reshapeHeader: [2, 2, 2, 0],
+    pivots,
+    pieceMeta,
+    polyCoeffs,
+    mmrCoeffs: new Array(576).fill(0),
   };
 }

@@ -33,7 +33,7 @@ describe('compact metadata packing', () => {
     const floats = new Float32Array(buffer);
 
     expect(floats).toHaveLength(COMPACT_DOVI_FLOAT32_COUNT);
-    expect(COMPACT_DOVI_FLOAT32_COUNT).toBe(276);
+    expect(COMPACT_DOVI_FLOAT32_COUNT).toBe(840);
     expect(floats[0]).toBe(0);
     expect(floats[4]).toBe(1);
     expect(floats[8 + 1]).toBe(1);
@@ -41,20 +41,21 @@ describe('compact metadata packing', () => {
     expect(floats[16]).toBe(1);
     expect(floats[28]).toBe(0);
     expect(floats[29]).toBe(1);
-    expect([...floats.slice(COMPACT_DOVI_LAYOUT.polyCoeffs, COMPACT_DOVI_LAYOUT.polyCoeffs + 12)]).toEqual([
-      0, 1, 0, 0,
-      0, 1, 0, 0,
-      0, 1, 0, 0,
-    ]);
+    expect([...floats.slice(COMPACT_DOVI_LAYOUT.reshapeHeader, COMPACT_DOVI_LAYOUT.reshapeHeader + 4)]).toEqual([2, 2, 2, 0]);
+    expect([...floats.slice(COMPACT_DOVI_LAYOUT.polyCoeffs, COMPACT_DOVI_LAYOUT.polyCoeffs + 4)]).toEqual([0, 1, 0, 0]);
+    expect([...floats.slice(COMPACT_DOVI_LAYOUT.polyCoeffs + 32, COMPACT_DOVI_LAYOUT.polyCoeffs + 36)]).toEqual([0, 1, 0, 0]);
+    expect([...floats.slice(COMPACT_DOVI_LAYOUT.polyCoeffs + 64, COMPACT_DOVI_LAYOUT.polyCoeffs + 68)]).toEqual([0, 1, 0, 0]);
   });
 
   it('packs matrix rows with vec4 padding for WGSL uniform layout', () => {
     const metadata = createIdentityDoviMetadata();
     metadata.nonlinearMatrix = [1, 2, 3, 4, 5, 6, 7, 8, 9];
     metadata.linearMatrix = [11, 12, 13, 14, 15, 16, 17, 18, 19];
-    metadata.pivots = Array.from({ length: 28 }, (_, index) => 100 + index);
-    metadata.polyCoeffs = Array.from({ length: 72 }, (_, index) => 200 + index);
-    metadata.mmrCoeffs = Array.from({ length: 144 }, (_, index) => 300 + index);
+    metadata.reshapeHeader = [3, 2, 2, 0];
+    metadata.pivots = Array.from({ length: 36 }, (_, index) => 100 + index);
+    metadata.pieceMeta = Array.from({ length: 96 }, (_, index) => 700 + index);
+    metadata.polyCoeffs = Array.from({ length: 96 }, (_, index) => 200 + index);
+    metadata.mmrCoeffs = Array.from({ length: 576 }, (_, index) => 300 + index);
 
     const floats = new Float32Array(packCompactDoviMetadata(metadata));
 
@@ -69,8 +70,9 @@ describe('compact metadata packing', () => {
       17, 18, 19, 0,
     ]);
     expect(floats[COMPACT_DOVI_LAYOUT.pivots]).toBe(100);
+    expect(floats[COMPACT_DOVI_LAYOUT.pieceMeta]).toBe(700);
     expect(floats[COMPACT_DOVI_LAYOUT.polyCoeffs]).toBe(200);
     expect(floats[COMPACT_DOVI_LAYOUT.mmrCoeffs]).toBe(300);
-    expect(floats[COMPACT_DOVI_FLOAT32_COUNT - 1]).toBe(443);
+    expect(floats[COMPACT_DOVI_FLOAT32_COUNT - 1]).toBe(875);
   });
 });

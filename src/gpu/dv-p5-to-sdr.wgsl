@@ -10,7 +10,7 @@ struct FrameParams {
 };
 
 struct DoviParams {
-  // ABI: 276 f32 values packed by src/core/metadata.ts and crates/lumabridge_wasm.
+  // ABI: 840 f32 values packed by src/core/metadata.ts and crates/lumabridge_wasm.
   nonlinearOffset: vec4<f32>,
   nonlinearMatrix0: vec4<f32>,
   nonlinearMatrix1: vec4<f32>,
@@ -19,9 +19,11 @@ struct DoviParams {
   linearMatrix1: vec4<f32>,
   linearMatrix2: vec4<f32>,
   sourcePq: vec4<f32>,
-  pivots: array<vec4<f32>, 7>,
-  polyCoeffs: array<vec4<f32>, 18>,
-  mmrCoeffs: array<vec4<f32>, 36>,
+  reshapeHeader: vec4<f32>,
+  pivots: array<vec4<f32>, 9>,
+  pieceMeta: array<vec4<f32>, 24>,
+  polyCoeffs: array<vec4<f32>, 24>,
+  mmrCoeffs: array<vec4<f32>, 144>,
 };
 
 @group(0) @binding(0) var<storage, read> yPlane: array<u32>;
@@ -105,6 +107,75 @@ fn dovi_poly(signal: f32, coeffs: vec3<f32>) -> f32 {
   return (coeffs.z * signal + coeffs.y) * signal + coeffs.x;
 }
 
+fn dovi_matrix3_mul(row0: vec4<f32>, row1: vec4<f32>, row2: vec4<f32>, value: vec3<f32>) -> vec3<f32> {
+  return vec3<f32>(
+    dot(row0.xyz, value),
+    dot(row1.xyz, value),
+    dot(row2.xyz, value)
+  );
+}
+
+fn pivot_value(component: u32, pivotIndex: u32) -> f32 {
+  let flat = component * 12u + pivotIndex;
+  let row = flat / 4u;
+  let col = flat % 4u;
+  return doviParams.pivots[row][col];
+}
+
+fn piece_meta(component: u32, pieceIndex: u32) -> vec4<f32> {
+  return doviParams.pieceMeta[component * 8u + pieceIndex];
+}
+
+fn poly_coeffs(component: u32, pieceIndex: u32) -> vec4<f32> {
+  return doviParams.polyCoeffs[component * 8u + pieceIndex];
+}
+
+fn mmr_coeffs(component: u32, pieceIndex: u32, orderIndex: u32, pairIndex: u32) -> vec4<f32> {
+  return doviParams.mmrCoeffs[((component * 8u + pieceIndex) * 3u + orderIndex) * 2u + pairIndex];
+}
+
+fn reshape_component(component: u32, signal: f32, sig: vec3<f32>) -> f32 {
+  let pivotCount = max(2u, min(9u, u32(round(doviParams.reshapeHeader[component]))));
+  var pieceIndex = 0u;
+  for (var i = 1u; i < 8u; i = i + 1u) {
+    if (i < pivotCount - 1u && signal >= pivot_value(component, i)) {
+      pieceIndex = i;
+    }
+  }
+
+  let meta = piece_meta(component, pieceIndex);
+  var outSignal = signal;
+  if (meta.x < 0.5) {
+    outSignal = dovi_poly(signal, poly_coeffs(component, pieceIndex).xyz);
+  } else {
+    let order = max(1u, min(3u, u32(round(meta.w))));
+    let sigX = vec4<f32>(sig.x * sig.x, sig.x * sig.y, sig.y * sig.z, sig.x * sig.y * sig.z);
+    outSignal = meta.y;
+    let mmr0a = mmr_coeffs(component, pieceIndex, 0u, 0u);
+    let mmr0b = mmr_coeffs(component, pieceIndex, 0u, 1u);
+    outSignal = outSignal + dot(mmr0a.xyz, sig);
+    outSignal = outSignal + dot(mmr0b, sigX);
+    if (order >= 2u) {
+      let sig2 = sig * sig;
+      let sigX2 = sigX * sigX;
+      let mmr1a = mmr_coeffs(component, pieceIndex, 1u, 0u);
+      let mmr1b = mmr_coeffs(component, pieceIndex, 1u, 1u);
+      outSignal = outSignal + dot(mmr1a.xyz, sig2);
+      outSignal = outSignal + dot(mmr1b, sigX2);
+      if (order >= 3u) {
+        let mmr2a = mmr_coeffs(component, pieceIndex, 2u, 0u);
+        let mmr2b = mmr_coeffs(component, pieceIndex, 2u, 1u);
+        outSignal = outSignal + dot(mmr2a.xyz, sig2 * sig);
+        outSignal = outSignal + dot(mmr2b, sigX2 * sigX);
+      }
+    }
+  }
+
+  let lo = pivot_value(component, 0u);
+  let hi = pivot_value(component, pivotCount - 1u);
+  return clamp(outSignal, lo, hi);
+}
+
 fn tone_map_reinhard(nits: vec3<f32>) -> vec3<f32> {
   let normalized = max(nits / vec3<f32>(100.0), vec3<f32>(0.0));
   return normalized / (vec3<f32>(1.0) + normalized);
@@ -149,6 +220,32 @@ fn render_dovi_p5_base(y: f32, u: f32, v: f32) -> vec3<f32> {
   return srgb_encode(sdr709);
 }
 
+fn render_dovi_rpu(y: f32, u: f32, v: f32) -> vec3<f32> {
+  let encoded = vec3<f32>(y, u, v);
+  let reshaped = vec3<f32>(
+    reshape_component(0u, encoded.x, encoded),
+    reshape_component(1u, encoded.y, encoded),
+    reshape_component(2u, encoded.z, encoded)
+  );
+  let nonlinearInput = reshaped - doviParams.nonlinearOffset.xyz;
+  let lmsCode = clamp(dovi_matrix3_mul(
+    doviParams.nonlinearMatrix0,
+    doviParams.nonlinearMatrix1,
+    doviParams.nonlinearMatrix2,
+    nonlinearInput
+  ), vec3<f32>(0.0), vec3<f32>(1.0));
+  let lmsNits = vec3<f32>(pq_eotf(lmsCode.x), pq_eotf(lmsCode.y), pq_eotf(lmsCode.z));
+  let lmsLinear = dovi_matrix3_mul(
+    doviParams.linearMatrix0,
+    doviParams.linearMatrix1,
+    doviParams.linearMatrix2,
+    lmsNits
+  );
+  let rgb2020 = dovi_lms_to_bt2020(lmsLinear);
+  let sdr709 = tone_map_reinhard(max(bt2020_to_bt709(rgb2020), vec3<f32>(0.0)));
+  return srgb_encode(sdr709);
+}
+
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   if (id.x >= frameParams.outputWidth || id.y >= frameParams.outputHeight) {
@@ -163,17 +260,13 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   let u = normalize_uv(sample_u10(uvIndex));
   let v = normalize_uv(sample_v10(uvIndex));
 
-  let reshapedYuv = vec3<f32>(
-    dovi_poly(y, doviParams.polyCoeffs[0].xyz),
-    dovi_poly(u, doviParams.polyCoeffs[1].xyz),
-    dovi_poly(v, doviParams.polyCoeffs[2].xyz)
-  );
-
-  var rgb = render_pq_sdr(reshapedYuv.x, reshapedYuv.y, reshapedYuv.z);
+  var rgb = render_dovi_rpu(y, u, v);
   if (frameParams.previewMode == 1u) {
     rgb = render_luma(y);
   } else if (frameParams.previewMode == 2u) {
     rgb = render_dovi_p5_base(y, u, v);
+  } else if (doviParams.reshapeHeader.x < 1.5) {
+    rgb = render_pq_sdr(y, u, v);
   }
 
   outputPixels[id.y * frameParams.outputWidth + id.x] = pack_rgba8(rgb);

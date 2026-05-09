@@ -55,5 +55,5 @@ writeFileSync('tests/references/rpu_reference.json', `${JSON.stringify({
   rpuCount: rpuNalUnits.length,
   firstRpuNalUnits: rpuNalUnits.slice(0, 8),
   metadataSchemaVersion: 1,
-  compactMetadataFloat32Count: 276,
+  compactMetadataFloat32Count: 840,
 }, null, 2)}\n`);

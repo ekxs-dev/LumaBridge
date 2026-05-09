@@ -6,14 +6,16 @@ use thiserror::Error;
 use wasm_bindgen::prelude::wasm_bindgen;
 
 pub const HEVC_NAL_DV_RPU: u8 = 62;
-pub const COMPACT_DOVI_FLOAT32_COUNT: usize = 276;
+pub const COMPACT_DOVI_FLOAT32_COUNT: usize = 840;
 pub const COMPACT_DOVI_NONLINEAR_OFFSET: usize = 0;
 pub const COMPACT_DOVI_NONLINEAR_MATRIX_OFFSET: usize = 4;
 pub const COMPACT_DOVI_LINEAR_MATRIX_OFFSET: usize = 16;
 pub const COMPACT_DOVI_SOURCE_PQ_OFFSET: usize = 28;
-pub const COMPACT_DOVI_PIVOTS_OFFSET: usize = 32;
-pub const COMPACT_DOVI_POLY_COEFFS_OFFSET: usize = 60;
-pub const COMPACT_DOVI_MMR_COEFFS_OFFSET: usize = 132;
+pub const COMPACT_DOVI_RESHAPE_HEADER_OFFSET: usize = 32;
+pub const COMPACT_DOVI_PIVOTS_OFFSET: usize = 36;
+pub const COMPACT_DOVI_PIECE_META_OFFSET: usize = 72;
+pub const COMPACT_DOVI_POLY_COEFFS_OFFSET: usize = 168;
+pub const COMPACT_DOVI_MMR_COEFFS_OFFSET: usize = 264;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum LumaWasmError {
@@ -45,26 +47,40 @@ pub struct CompactDoviMetadata {
     pub linear_matrix: [f32; 9],
     pub source_min_pq: f32,
     pub source_max_pq: f32,
+    pub reshape_header: [f32; 4],
     pub pivots: Vec<f32>,
+    pub piece_meta: Vec<f32>,
     pub poly_coeffs: Vec<f32>,
     pub mmr_coeffs: Vec<f32>,
 }
 
 impl Default for CompactDoviMetadata {
     fn default() -> Self {
-        let mut poly_coeffs = vec![0.0; 72];
-        poly_coeffs[1] = 1.0;
-        poly_coeffs[5] = 1.0;
-        poly_coeffs[9] = 1.0;
+        let mut pivots = vec![0.0; 36];
+        let mut piece_meta = vec![0.0; 96];
+        let mut poly_coeffs = vec![0.0; 96];
+        for component in 0..3 {
+            let pivot_base = component * 12;
+            pivots[pivot_base] = 0.0;
+            pivots[pivot_base + 1] = 1.0;
+            let piece_base = component * 8 * 4;
+            piece_meta[piece_base] = 0.0;
+            piece_meta[piece_base + 3] = 1.0;
+            poly_coeffs[piece_base] = 0.0;
+            poly_coeffs[piece_base + 1] = 1.0;
+            poly_coeffs[piece_base + 2] = 0.0;
+        }
         Self {
             nonlinear_offset: [0.0; 3],
             nonlinear_matrix: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
             linear_matrix: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
             source_min_pq: 0.0,
             source_max_pq: 1.0,
-            pivots: vec![0.0; 28],
+            reshape_header: [2.0, 2.0, 2.0, 0.0],
+            pivots,
+            piece_meta,
             poly_coeffs,
-            mmr_coeffs: vec![0.0; 144],
+            mmr_coeffs: vec![0.0; 576],
         }
     }
 }
@@ -80,7 +96,12 @@ pub fn parse_annex_b(data: &[u8]) -> Result<Vec<NalUnit>, LumaWasmError> {
         if data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1 {
             starts.push((i, 3));
             i += 3;
-        } else if i + 4 < data.len() && data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 0 && data[i + 3] == 1 {
+        } else if i + 4 < data.len()
+            && data[i] == 0
+            && data[i + 1] == 0
+            && data[i + 2] == 0
+            && data[i + 3] == 1
+        {
             starts.push((i, 4));
             i += 4;
         } else {
@@ -95,7 +116,10 @@ pub fn parse_annex_b(data: &[u8]) -> Result<Vec<NalUnit>, LumaWasmError> {
     let mut units = Vec::new();
     for (index, (start, prefix)) in starts.iter().enumerate() {
         let offset = start + prefix;
-        let end = starts.get(index + 1).map(|next| next.0).unwrap_or(data.len());
+        let end = starts
+            .get(index + 1)
+            .map(|next| next.0)
+            .unwrap_or(data.len());
         if offset + 2 <= end {
             units.push(NalUnit {
                 nal_type: nal_type(data[offset]),
@@ -108,7 +132,10 @@ pub fn parse_annex_b(data: &[u8]) -> Result<Vec<NalUnit>, LumaWasmError> {
     Ok(units)
 }
 
-pub fn parse_length_prefixed(data: &[u8], length_size: usize) -> Result<Vec<NalUnit>, LumaWasmError> {
+pub fn parse_length_prefixed(
+    data: &[u8],
+    length_size: usize,
+) -> Result<Vec<NalUnit>, LumaWasmError> {
     if !(1..=4).contains(&length_size) {
         return Err(LumaWasmError::InvalidHevc);
     }
@@ -198,7 +225,9 @@ fn compact_metadata_from_dovi_rpu(rpu: &DoviRpu) -> Option<CompactDoviMetadata> 
         ..CompactDoviMetadata::default()
     };
 
+    metadata.reshape_header.fill(0.0);
     metadata.pivots.fill(0.0);
+    metadata.piece_meta.fill(0.0);
     metadata.poly_coeffs.fill(0.0);
     metadata.mmr_coeffs.fill(0.0);
 
@@ -207,19 +236,29 @@ fn compact_metadata_from_dovi_rpu(rpu: &DoviRpu) -> Option<CompactDoviMetadata> 
             break;
         }
 
-        let pivot_base = component_index * 9;
+        let pivot_count = curve.pivots.len().clamp(2, 9);
+        metadata.reshape_header[component_index] = pivot_count as f32;
+        let pivot_base = component_index * 12;
         for (pivot_index, pivot) in curve.pivots.iter().take(9).enumerate() {
             metadata.pivots[pivot_base + pivot_index] = *pivot as f32 * pivot_scale;
         }
 
         let piece_count = curve.pivots.len().saturating_sub(1).min(8);
         for piece_index in 0..piece_count {
+            let piece_base = (component_index * 8 + piece_index) * 4;
             match curve.mapping_idc {
                 DoviMappingMethod::Polynomial => {
                     let Some(poly) = curve.polynomial.as_ref() else {
                         continue;
                     };
-                    let coeff_base = (component_index * 8 + piece_index) * 3;
+                    metadata.piece_meta[piece_base] = 0.0;
+                    metadata.piece_meta[piece_base + 3] = poly
+                        .poly_coef_int
+                        .get(piece_index)
+                        .map(|coeffs| coeffs.len())
+                        .unwrap_or(0)
+                        .max(1) as f32;
+                    let coeff_base = piece_base;
                     for coeff_index in 0..3 {
                         let int_part = poly
                             .poly_coef_int
@@ -234,39 +273,52 @@ fn compact_metadata_from_dovi_rpu(rpu: &DoviRpu) -> Option<CompactDoviMetadata> 
                             .copied()
                             .unwrap_or(0) as i64;
                         metadata.poly_coeffs[coeff_base + coeff_index] =
-                            ((int_part << header.coefficient_log2_denom) + frac_part) as f32 * coefficient_scale;
+                            ((int_part << header.coefficient_log2_denom) + frac_part) as f32
+                                * coefficient_scale;
                     }
                 }
                 DoviMappingMethod::MMR => {
                     let Some(mmr) = curve.mmr.as_ref() else {
                         continue;
                     };
-                    let coeff_base = (component_index * 8 + piece_index) * 6;
-                    let constant_int = mmr
-                        .mmr_constant_int
+                    let mmr_order = mmr
+                        .mmr_order_minus1
                         .get(piece_index)
                         .copied()
-                        .unwrap_or(0);
-                    let constant_frac = mmr.mmr_constant.get(piece_index).copied().unwrap_or(0) as i64;
-                    metadata.mmr_coeffs[coeff_base] =
-                        ((constant_int << header.coefficient_log2_denom) + constant_frac) as f32 * coefficient_scale;
-                    for coeff_index in 0..5 {
-                        let int_part = mmr
-                            .mmr_coef_int
-                            .get(piece_index)
-                            .and_then(|orders| orders.first())
-                            .and_then(|coeffs| coeffs.get(coeff_index))
-                            .copied()
-                            .unwrap_or(0);
-                        let frac_part = mmr
-                            .mmr_coef
-                            .get(piece_index)
-                            .and_then(|orders| orders.first())
-                            .and_then(|coeffs| coeffs.get(coeff_index))
-                            .copied()
-                            .unwrap_or(0) as i64;
-                        metadata.mmr_coeffs[coeff_base + 1 + coeff_index] =
-                            ((int_part << header.coefficient_log2_denom) + frac_part) as f32 * coefficient_scale;
+                        .unwrap_or(0)
+                        .saturating_add(1)
+                        .clamp(1, 3);
+                    metadata.piece_meta[piece_base] = 1.0;
+                    metadata.piece_meta[piece_base + 3] = mmr_order as f32;
+                    let constant_int = mmr.mmr_constant_int.get(piece_index).copied().unwrap_or(0);
+                    let constant_frac =
+                        mmr.mmr_constant.get(piece_index).copied().unwrap_or(0) as i64;
+                    metadata.piece_meta[piece_base + 1] =
+                        ((constant_int << header.coefficient_log2_denom) + constant_frac) as f32
+                            * coefficient_scale;
+
+                    for order_index in 0..(mmr_order as usize) {
+                        let coeff_base =
+                            ((component_index * 8 + piece_index) * 3 + order_index) * 8;
+                        for coeff_index in 0..7 {
+                            let int_part = mmr
+                                .mmr_coef_int
+                                .get(piece_index)
+                                .and_then(|orders| orders.get(order_index))
+                                .and_then(|coeffs| coeffs.get(coeff_index))
+                                .copied()
+                                .unwrap_or(0);
+                            let frac_part = mmr
+                                .mmr_coef
+                                .get(piece_index)
+                                .and_then(|orders| orders.get(order_index))
+                                .and_then(|coeffs| coeffs.get(coeff_index))
+                                .copied()
+                                .unwrap_or(0) as i64;
+                            metadata.mmr_coeffs[coeff_base + coeff_index] =
+                                ((int_part << header.coefficient_log2_denom) + frac_part) as f32
+                                    * coefficient_scale;
+                        }
                     }
                 }
                 DoviMappingMethod::Invalid => {}
@@ -279,26 +331,70 @@ fn compact_metadata_from_dovi_rpu(rpu: &DoviRpu) -> Option<CompactDoviMetadata> 
 
 pub fn pack_metadata(metadata: &CompactDoviMetadata) -> [f32; COMPACT_DOVI_FLOAT32_COUNT] {
     let mut packed = [0.0; COMPACT_DOVI_FLOAT32_COUNT];
-    packed[COMPACT_DOVI_NONLINEAR_OFFSET..COMPACT_DOVI_NONLINEAR_OFFSET + 3].copy_from_slice(&metadata.nonlinear_offset);
-    pack_vec4_rows(&mut packed, COMPACT_DOVI_NONLINEAR_MATRIX_OFFSET, &metadata.nonlinear_matrix, 3, 3);
-    pack_vec4_rows(&mut packed, COMPACT_DOVI_LINEAR_MATRIX_OFFSET, &metadata.linear_matrix, 3, 3);
+    packed[COMPACT_DOVI_NONLINEAR_OFFSET..COMPACT_DOVI_NONLINEAR_OFFSET + 3]
+        .copy_from_slice(&metadata.nonlinear_offset);
+    pack_vec4_rows(
+        &mut packed,
+        COMPACT_DOVI_NONLINEAR_MATRIX_OFFSET,
+        &metadata.nonlinear_matrix,
+        3,
+        3,
+    );
+    pack_vec4_rows(
+        &mut packed,
+        COMPACT_DOVI_LINEAR_MATRIX_OFFSET,
+        &metadata.linear_matrix,
+        3,
+        3,
+    );
     packed[COMPACT_DOVI_SOURCE_PQ_OFFSET] = metadata.source_min_pq;
     packed[COMPACT_DOVI_SOURCE_PQ_OFFSET + 1] = metadata.source_max_pq;
-    pack_slice(&mut packed, COMPACT_DOVI_PIVOTS_OFFSET, &metadata.pivots, 28);
-    pack_slice(&mut packed, COMPACT_DOVI_POLY_COEFFS_OFFSET, &metadata.poly_coeffs, 72);
-    pack_slice(&mut packed, COMPACT_DOVI_MMR_COEFFS_OFFSET, &metadata.mmr_coeffs, 144);
+    packed[COMPACT_DOVI_RESHAPE_HEADER_OFFSET..COMPACT_DOVI_RESHAPE_HEADER_OFFSET + 4]
+        .copy_from_slice(&metadata.reshape_header);
+    pack_slice(
+        &mut packed,
+        COMPACT_DOVI_PIVOTS_OFFSET,
+        &metadata.pivots,
+        36,
+    );
+    pack_slice(
+        &mut packed,
+        COMPACT_DOVI_PIECE_META_OFFSET,
+        &metadata.piece_meta,
+        96,
+    );
+    pack_slice(
+        &mut packed,
+        COMPACT_DOVI_POLY_COEFFS_OFFSET,
+        &metadata.poly_coeffs,
+        96,
+    );
+    pack_slice(
+        &mut packed,
+        COMPACT_DOVI_MMR_COEFFS_OFFSET,
+        &metadata.mmr_coeffs,
+        576,
+    );
     packed
 }
 
 #[cfg(feature = "wasm")]
 #[wasm_bindgen(js_name = parseRpuMetadataPacked)]
-pub fn parse_rpu_metadata_packed_wasm(rpu_payload: &[u8]) -> Result<Vec<f32>, wasm_bindgen::JsValue> {
+pub fn parse_rpu_metadata_packed_wasm(
+    rpu_payload: &[u8],
+) -> Result<Vec<f32>, wasm_bindgen::JsValue> {
     let metadata = parse_rpu_metadata(rpu_payload)
         .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))?;
     Ok(pack_metadata(&metadata).to_vec())
 }
 
-fn pack_vec4_rows(packed: &mut [f32], offset: usize, values: &[f32], row_count: usize, row_width: usize) {
+fn pack_vec4_rows(
+    packed: &mut [f32],
+    offset: usize,
+    values: &[f32],
+    row_count: usize,
+    row_width: usize,
+) {
     for row in 0..row_count {
         for column in 0..row_width {
             packed[offset + row * 4 + column] = values[row * row_width + column];
@@ -337,14 +433,29 @@ mod tests {
     fn packs_metadata_with_fixed_layout() {
         let packed = pack_metadata(&CompactDoviMetadata::default());
         assert_eq!(packed.len(), COMPACT_DOVI_FLOAT32_COUNT);
-        assert_eq!(COMPACT_DOVI_FLOAT32_COUNT, 276);
+        assert_eq!(COMPACT_DOVI_FLOAT32_COUNT, 840);
         assert_eq!(packed[4], 1.0);
         assert_eq!(packed[9], 1.0);
         assert_eq!(packed[14], 1.0);
         assert_eq!(packed[16], 1.0);
         assert_eq!(packed[28], 0.0);
         assert_eq!(packed[29], 1.0);
-        assert_eq!(&packed[60..72], &[0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        assert_eq!(
+            &packed[COMPACT_DOVI_RESHAPE_HEADER_OFFSET..COMPACT_DOVI_RESHAPE_HEADER_OFFSET + 4],
+            &[2.0, 2.0, 2.0, 0.0]
+        );
+        assert_eq!(
+            &packed[COMPACT_DOVI_POLY_COEFFS_OFFSET..COMPACT_DOVI_POLY_COEFFS_OFFSET + 4],
+            &[0.0, 1.0, 0.0, 0.0]
+        );
+        assert_eq!(
+            &packed[COMPACT_DOVI_POLY_COEFFS_OFFSET + 32..COMPACT_DOVI_POLY_COEFFS_OFFSET + 36],
+            &[0.0, 1.0, 0.0, 0.0]
+        );
+        assert_eq!(
+            &packed[COMPACT_DOVI_POLY_COEFFS_OFFSET + 64..COMPACT_DOVI_POLY_COEFFS_OFFSET + 68],
+            &[0.0, 1.0, 0.0, 0.0]
+        );
     }
 
     #[test]
@@ -353,21 +464,32 @@ mod tests {
         metadata.nonlinear_matrix = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
         metadata.linear_matrix = [11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0];
         metadata.pivots[0] = 100.0;
+        metadata.piece_meta[0] = 1.0;
         metadata.poly_coeffs[0] = 200.0;
-        metadata.mmr_coeffs[143] = 443.0;
+        metadata.mmr_coeffs[575] = 875.0;
 
         let packed = pack_metadata(&metadata);
 
-        assert_eq!(&packed[4..16], &[1.0, 2.0, 3.0, 0.0, 4.0, 5.0, 6.0, 0.0, 7.0, 8.0, 9.0, 0.0]);
-        assert_eq!(&packed[16..28], &[11.0, 12.0, 13.0, 0.0, 14.0, 15.0, 16.0, 0.0, 17.0, 18.0, 19.0, 0.0]);
+        assert_eq!(
+            &packed[4..16],
+            &[1.0, 2.0, 3.0, 0.0, 4.0, 5.0, 6.0, 0.0, 7.0, 8.0, 9.0, 0.0]
+        );
+        assert_eq!(
+            &packed[16..28],
+            &[11.0, 12.0, 13.0, 0.0, 14.0, 15.0, 16.0, 0.0, 17.0, 18.0, 19.0, 0.0]
+        );
         assert_eq!(packed[COMPACT_DOVI_PIVOTS_OFFSET], 100.0);
+        assert_eq!(packed[COMPACT_DOVI_PIECE_META_OFFSET], 1.0);
         assert_eq!(packed[COMPACT_DOVI_POLY_COEFFS_OFFSET], 200.0);
-        assert_eq!(packed[COMPACT_DOVI_FLOAT32_COUNT - 1], 443.0);
+        assert_eq!(packed[COMPACT_DOVI_FLOAT32_COUNT - 1], 875.0);
     }
 
     #[test]
     fn malformed_rpu_returns_error() {
-        assert_eq!(parse_rpu_metadata(&[]).unwrap_err(), LumaWasmError::InvalidRpu);
+        assert_eq!(
+            parse_rpu_metadata(&[]).unwrap_err(),
+            LumaWasmError::InvalidRpu
+        );
     }
 
     #[test]
@@ -385,10 +507,16 @@ mod tests {
         assert!((metadata.linear_matrix[0] - 17081.0 / 16384.0).abs() < 0.0001);
         assert!((metadata.source_min_pq - 7.0 / 4095.0).abs() < 0.0001);
         assert!((metadata.source_max_pq - 3079.0 / 4095.0).abs() < 0.0001);
-        assert!(metadata.pivots.iter().any(|value| *value > 0.0 && *value < 1.0));
+        assert!(metadata
+            .pivots
+            .iter()
+            .any(|value| *value > 0.0 && *value < 1.0));
         assert!((metadata.poly_coeffs[0] - 9133.0 / 8_388_608.0).abs() < 0.0001);
         assert!((metadata.poly_coeffs[1] - 17_647_044.0 / 8_388_608.0).abs() < 0.0001);
-        assert!(metadata.poly_coeffs.iter().any(|value| value.abs() > 0.0001));
+        assert!(metadata
+            .poly_coeffs
+            .iter()
+            .any(|value| value.abs() > 0.0001));
     }
 
     fn find_first_fixture_rpu(bytes: &[u8]) -> Option<&[u8]> {
@@ -403,7 +531,9 @@ mod tests {
                 let mut sample_cursor = cursor + 8;
                 let end = cursor + size;
                 while sample_cursor + 4 <= end {
-                    let nal_size = u32::from_be_bytes(bytes[sample_cursor..sample_cursor + 4].try_into().ok()?) as usize;
+                    let nal_size = u32::from_be_bytes(
+                        bytes[sample_cursor..sample_cursor + 4].try_into().ok()?,
+                    ) as usize;
                     let payload = sample_cursor + 4;
                     if nal_size == 0 || payload + nal_size > end {
                         return None;

@@ -80,13 +80,13 @@ npm run test:rust
 - `/bench` also has diagnostic raw-frame preview controls: a time slider/seconds input plus Raw luma, DV P5 base approximation, and PQ SDR approximation modes. Raw luma confirms decoded frame structure; DV P5 base approximation interprets the planes as IPT/PQ before RPU reshape; PQ SDR intentionally shows the incorrect HDR10-style path for comparison.
 - `/bench` shows selected-time Frame/RPU alignment for parsed samples: sample index, timestamp, RPU count, and first RPU NAL bytes. Large MKV files are still prefix-parsed, so seeks beyond that parsed window report unknown/outside until streaming demux is implemented.
 - When selected time is outside the parsed prefix and ffmpeg.wasm raw preview succeeds, `/bench` also tries a one-packet HEVC copy probe (`hevc_mp4toannexb`) at that time and scans the Annex-B packet for RPU NALs. This is diagnostic fallback, not the final demux strategy.
-- Compact DV metadata ABI is 276 `f32` values with WGSL `vec4` row padding. Keep `src/core/metadata.ts`, `crates/lumabridge_wasm/src/lib.rs`, and `src/gpu/dv-p5-to-sdr.wgsl` aligned.
+- Compact DV metadata ABI v2 is 840 `f32` values with explicit `reshapeHeader`, padded pivots, per-piece method/order metadata, polynomial slots, and full MMR coefficient slots. Keep `src/core/metadata.ts`, `crates/lumabridge_wasm/src/lib.rs`, and `src/gpu/dv-p5-to-sdr.wgsl` aligned.
 - `src/core/gpu-upload.ts` prepares tightly packed `u32` Y/U/V storage-buffer data plus source/output frame params from I420P10 frames. `/bench` attempts a live WebGPU buffer upload after ffmpeg.wasm raw-frame decode when WebGPU is available.
-- `src/core/rpu-metadata.ts` lazy-loads the generated Rust/WASM parser and converts selected-frame RPU NAL payloads into the 276-f32 compact shader metadata buffer. If parsing fails or no RPU payload is available, `/bench` falls back to identity metadata and reports that explicitly.
+- `src/core/rpu-metadata.ts` lazy-loads the generated Rust/WASM parser and converts selected-frame RPU NAL payloads into the 840-f32 compact shader metadata buffer. If parsing fails or no RPU payload is available, `/bench` falls back to identity metadata and reports that explicitly.
 - `src/core/webgpu-render.ts` runs the WGSL compute shader against the ffmpeg.wasm raw frame and reads back an RGBA8 SDR debug preview when WebGPU is available. It now accepts packed RPU metadata, but the WGSL reshape math is still simplified/debug quality.
 - Rust `parse_rpu_metadata` now uses the MIT `dolby_vision` crate to parse real HEVC type-62 RPU payloads and fill compact metadata with Dolby matrices, offsets, source PQ, pivots, and polynomial/MMR coefficient slots. It is still pending final libplacebo parity for pivot interpretation, per-piece method/order packing, and shader application.
 - The browser WASM package is built with rustup stable + `wasm32-unknown-unknown` and `wasm-bindgen-cli` 0.2.121 via `npm run build:wasm`.
-- WGSL currently contains a debug compute path and simplified preview modes, not libplacebo-accurate DV reshaping.
+- WGSL currently contains a debug compute path and simplified preview modes. It now applies ABI v2 RPU reshape metadata for diagnostics, but the result is not yet libplacebo/reference validated.
 
 ## PR / Commit Guidance
 - Suggested title format: `[lumabridge] <Title>`.
@@ -115,12 +115,13 @@ npm run test:rust
 - [x] Replace Rust placeholder RPU parsing with real `dolby_vision` crate-backed metadata extraction.
 - [x] Generate browser WASM bindings for the Rust RPU parser and load them from TypeScript.
 - [x] Pass selected-frame packed RPU metadata into WebGPU render diagnostics when available.
+- [x] Expand compact metadata ABI to carry reshape header, per-piece method/order metadata, polynomial slots, and full MMR coefficient slots.
 - [ ] Validate RPU pivot/method/MMR packing against FFmpeg/libplacebo for all compact metadata slots.
 - [x] Define and freeze the compact metadata buffer ABI between Rust, TypeScript, and WGSL.
 - [x] Add deterministic I420P10 plane upload planning for WebGPU storage buffers.
 - [x] Wire ffmpeg.wasm raw-frame output to a live WebGPU buffer upload probe on `/bench`.
 - [x] Add WebGPU compute shader SDR debug render/readback for raw I420P10 preview frames.
-- [ ] Implement libplacebo-aligned DV polynomial/MMR reshape in WGSL.
+- [ ] Implement and validate libplacebo-aligned DV polynomial/MMR reshape in WGSL.
 - [ ] Add real SDR frame readback and pixel-error comparison against `sdr_reference.png`.
 - [ ] Replace synthetic benchmark timings with measured demux/decode/copy/upload/shader/present timings.
 - [ ] Add benchmark file-selection e2e that uploads a fixture and verifies metadata/report updates.
