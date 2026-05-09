@@ -27,6 +27,8 @@ test('benchmark page emits a JSON timing report', async ({ page }) => {
   await expect(page.getByText('WebCodecs probe')).toBeVisible();
   await expect(page.locator('#video-file')).toBeAttached();
   await expect(page.locator('#bench-video')).toBeVisible();
+  await expect(page.locator('#sdr-preview')).toBeVisible();
+  await expect(page.locator('#sdr-preview-meta')).toContainText('SDR debug preview waiting');
   await expect(page.locator('#ffmpeg-raw-probe')).toBeDisabled();
   await expect(page.getByRole('rowheader', { name: 'copyTo' })).toBeVisible();
   await expect(page.getByRole('rowheader', { name: 'shaderRender' })).toBeVisible();

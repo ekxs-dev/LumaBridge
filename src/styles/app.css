@@ -129,6 +129,10 @@ video {
   object-fit: contain;
 }
 
+.sdr-preview {
+  margin-top: 18px;
+}
+
 .viewer-meta,
 .bench-topline {
   flex-wrap: wrap;

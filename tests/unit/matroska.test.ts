@@ -50,4 +50,22 @@ describe('Matroska parser', () => {
     expect(track.height).toBe(1608);
     expect(track.samples.length).toBeGreaterThan(0);
   });
+
+  it('reports unsupported Matroska video codecs as tracks instead of container failures', () => {
+    const bytes = new Uint8Array(fs.readFileSync(fixture));
+    const mutated = new Uint8Array(bytes);
+    const hevcCodecId = new TextEncoder().encode('V_MPEGH/ISO/HEVC');
+    const avcCodecId = new TextEncoder().encode('V_MPEG4/ISO/AVC ');
+    const codecOffset = bytes.findIndex((value, index) => hevcCodecId.every((byte, byteIndex) => bytes[index + byteIndex] === byte));
+    expect(codecOffset).toBeGreaterThan(0);
+    mutated.set(avcCodecId, codecOffset);
+
+    const parsed = parseMatroska(mutated);
+    const track = parsed.tracks[0];
+
+    expect(track.codecType).toBe('V_MPEG4/ISO/AVC');
+    expect(track.hevcConfig).toBeNull();
+    expect(track.hasDolbyVisionConfig).toBe(false);
+    expect(track.sampleCount).toBeGreaterThan(0);
+  });
 });

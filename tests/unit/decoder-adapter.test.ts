@@ -45,6 +45,15 @@ vi.mock('@ffmpeg/ffmpeg', () => ({
     async unmount() {
       return true;
     }
+    async exec() {
+      return 0;
+    }
+    async readFile() {
+      return new Uint8Array(1920 * 1080 * 3);
+    }
+    async deleteFile() {
+      return true;
+    }
   },
 }));
 

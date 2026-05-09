@@ -5,6 +5,7 @@ import { probeDecoderAdapters, probeFfmpegWasmAdapter, type DecoderAdapterProbe 
 import { analyzeMp4HevcSamples, parseLengthPrefixedHevcSample } from './core/hevc';
 import { parseMediaFile, type ParsedMediaSource } from './core/media-source';
 import type { Mp4VideoTrack } from './core/mp4';
+import { convertI420P10ToSdrPreview, createI420P10Frame, type SdrPreviewImage } from './core/raw-frame';
 import type { DecodedFrameProbe } from './core/webcodecs';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -114,6 +115,12 @@ function renderBench() {
     },
     webCodecs: null as DecodedFrameProbe | null,
     decoderAdapter: null as DecoderAdapterProbe | null,
+    sdrPreview: null as null | {
+      width: number;
+      height: number;
+      averageRgb: [number, number, number];
+      nonBlackPixels: number;
+    },
     parseError: null as string | null,
     summary,
   };
@@ -169,6 +176,11 @@ function renderBench() {
             <span>Local preview only</span>
             <span>Benchmark timings remain synthetic until decode pipeline is connected</span>
           </div>
+          <canvas id="sdr-preview" class="sdr-preview" width="960" height="402" aria-label="SDR debug preview"></canvas>
+          <div class="viewer-meta" id="sdr-preview-meta">
+            <span>SDR debug preview waiting</span>
+            <span>ffmpeg.wasm I420P10 → CPU PQ/BT.2020 approximation</span>
+          </div>
         </div>
       </section>
 
@@ -198,10 +210,52 @@ function renderBench() {
   const decodeMeta = document.querySelector<HTMLElement>('#decode-meta');
   const reportJson = document.querySelector<HTMLElement>('#report-json');
   const ffmpegRawProbe = document.querySelector<HTMLButtonElement>('#ffmpeg-raw-probe');
+  const sdrPreviewCanvas = document.querySelector<HTMLCanvasElement>('#sdr-preview');
+  const sdrPreviewMeta = document.querySelector<HTMLElement>('#sdr-preview-meta');
   let activeTrack: Mp4VideoTrack | null = null;
 
   const updateReport = () => {
-    if (reportJson) reportJson.textContent = JSON.stringify(report, null, 2);
+    if (reportJson) {
+      reportJson.textContent = JSON.stringify(report, (key, value: unknown) => {
+        if (key === 'data' && value instanceof Uint8Array) return `<${value.byteLength} bytes>`;
+        return value;
+      }, 2);
+    }
+  };
+
+  const clearSdrPreview = () => {
+    if (!sdrPreviewCanvas) return;
+    const ctx = sdrPreviewCanvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, sdrPreviewCanvas.width, sdrPreviewCanvas.height);
+    if (sdrPreviewMeta) {
+      sdrPreviewMeta.innerHTML = `
+        <span>SDR debug preview waiting</span>
+        <span>ffmpeg.wasm I420P10 → CPU PQ/BT.2020 approximation</span>
+      `;
+    }
+  };
+
+  const drawSdrPreview = (preview: SdrPreviewImage) => {
+    if (!sdrPreviewCanvas) return;
+    sdrPreviewCanvas.width = preview.width;
+    sdrPreviewCanvas.height = preview.height;
+    const ctx = sdrPreviewCanvas.getContext('2d');
+    if (!ctx) return;
+    ctx.putImageData(new ImageData(preview.data, preview.width, preview.height), 0, 0);
+    report.sdrPreview = {
+      width: preview.width,
+      height: preview.height,
+      averageRgb: preview.stats.averageRgb,
+      nonBlackPixels: preview.stats.nonBlackPixels,
+    };
+    if (sdrPreviewMeta) {
+      sdrPreviewMeta.innerHTML = `
+        <span>SDR debug preview ${preview.width} x ${preview.height}</span>
+        <span>avg RGB ${preview.stats.averageRgb.map((value) => value.toFixed(1)).join(', ')}</span>
+        <span>${preview.stats.nonBlackPixels} non-black pixels</span>
+      `;
+    }
   };
 
   const updateTrackMeta = (
@@ -292,6 +346,19 @@ function renderBench() {
     `;
   };
 
+  const updateDecodeSkipped = (track: Mp4VideoTrack) => {
+    if (!decodeMeta) return;
+    decodeMeta.innerHTML = `
+      <dt>adapter</dt><dd>not selected</dd>
+      <dt>support</dt><dd>skipped: DV P5 path requires HEVC Main10, got ${track.codecType}</dd>
+      <dt>frame</dt><dd>not decoded</dd>
+      <dt>format</dt><dd>unknown</dd>
+      <dt>color</dt><dd>unknown</dd>
+      <dt>copyTo</dt><dd>not attempted</dd>
+      <dt>fallback</dt><dd>not applicable for non-HEVC input</dd>
+    `;
+  };
+
   fileInput?.addEventListener('change', async () => {
     const file = fileInput.files?.[0];
     if (!file || !video) return;
@@ -311,9 +378,11 @@ function renderBench() {
     report.mp4 = null;
     report.webCodecs = null;
     report.decoderAdapter = null;
+    report.sdrPreview = null;
     activeTrack = null;
     report.parseError = null;
     if (ffmpegRawProbe) ffmpegRawProbe.disabled = true;
+    clearSdrPreview();
     updateDecodeMeta(null);
 
     if (videoMeta) {
@@ -371,6 +440,8 @@ function renderBench() {
         report.webCodecs = report.decoderAdapter.webCodecs;
         if (ffmpegRawProbe) ffmpegRawProbe.disabled = false;
         updateDecodeMeta(report.decoderAdapter);
+      } else if (track) {
+        updateDecodeSkipped(track);
       }
     } catch (error) {
       report.parseError = error instanceof Error ? error.message : String(error);
@@ -399,6 +470,11 @@ function renderBench() {
     report.decoderAdapter.selected = report.decoderAdapter.ffmpegWasm.available ? 'ffmpeg.wasm' : report.decoderAdapter.selected;
     report.decoderAdapter.status = report.decoderAdapter.ffmpegWasm.rawFrame.ok ? 'fallback-available' : 'failed';
     report.decoderAdapter.fallbackReason ??= 'Manual ffmpeg.wasm raw-frame probe requested.';
+    const rawFrame = report.decoderAdapter.ffmpegWasm.rawFrame;
+    if (rawFrame.ok && rawFrame.data) {
+      const preview = convertI420P10ToSdrPreview(createI420P10Frame(rawFrame.data, track.width, track.height, 'full'));
+      drawSdrPreview(preview);
+    }
     updateDecodeMeta(report.decoderAdapter);
     updateReport();
     ffmpegRawProbe.textContent = 'Probe ffmpeg.wasm raw frame';
@@ -420,7 +496,10 @@ function renderBench() {
   });
 
   document.querySelector('#export-report')?.addEventListener('click', () => {
-    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(report, (key, value: unknown) => {
+      if (key === 'data' && value instanceof Uint8Array) return `<${value.byteLength} bytes>`;
+      return value;
+    }, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;

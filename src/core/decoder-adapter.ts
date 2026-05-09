@@ -17,6 +17,7 @@ export interface FfmpegRawFrameProbe {
   format: 'I420P10' | null;
   bytes: number | null;
   expectedBytes: number | null;
+  data: Uint8Array | null;
   error: string | null;
 }
 
@@ -89,6 +90,7 @@ function rawFrameNotAttempted(): FfmpegRawFrameProbe {
     format: null,
     bytes: null,
     expectedBytes: null,
+    data: null,
     error: null,
   };
 }
@@ -159,12 +161,14 @@ async function decodeFirstRawFrameWithFfmpeg(ffmpeg: FFmpeg, file: File, track: 
         format: null,
         bytes: null,
         expectedBytes,
+        data: null,
         error: `ffmpeg exited with code ${exitCode}.`,
       };
     }
 
     const raw = await ffmpeg.readFile(outputPath);
-    const bytes = typeof raw === 'string' ? new TextEncoder().encode(raw).byteLength : raw.byteLength;
+    const rawBytes = typeof raw === 'string' ? new TextEncoder().encode(raw) : raw;
+    const bytes = rawBytes.byteLength;
     return {
       attempted: true,
       ok: bytes === expectedBytes,
@@ -173,6 +177,7 @@ async function decodeFirstRawFrameWithFfmpeg(ffmpeg: FFmpeg, file: File, track: 
       format: 'I420P10',
       bytes,
       expectedBytes,
+      data: rawBytes,
       error: bytes === expectedBytes ? null : `Expected ${expectedBytes} raw bytes, got ${bytes}.`,
     };
   } catch (error) {
@@ -184,6 +189,7 @@ async function decodeFirstRawFrameWithFfmpeg(ffmpeg: FFmpeg, file: File, track: 
       format: null,
       bytes: null,
       expectedBytes,
+      data: null,
       error: error instanceof Error ? error.message : String(error),
     };
   } finally {

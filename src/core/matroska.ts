@@ -174,12 +174,12 @@ export function parseMatroska(data: Uint8Array, maxSamples = 240): MatroskaParse
     if (!trackType || reader.uint(trackType) !== 1) continue;
     const trackNumber = child(reader, entry, IDS.TrackNumber);
     const codec = child(reader, entry, IDS.CodecID);
-    const privateElement = child(reader, entry, IDS.CodecPrivate);
     const video = child(reader, entry, IDS.Video);
-    if (!trackNumber || !codec || !privateElement || !video) continue;
+    if (!trackNumber || !codec || !video) continue;
+    const privateElement = child(reader, entry, IDS.CodecPrivate);
     videoTrackNumber = reader.uint(trackNumber);
-    codecId = reader.ascii(codec);
-    codecPrivate = data.slice(privateElement.dataStart, privateElement.dataEnd);
+    codecId = reader.ascii(codec).trim();
+    codecPrivate = privateElement ? data.slice(privateElement.dataStart, privateElement.dataEnd) : null;
     const pixelWidth = child(reader, video, IDS.PixelWidth);
     const pixelHeight = child(reader, video, IDS.PixelHeight);
     width = pixelWidth ? reader.uint(pixelWidth) : 0;
@@ -187,8 +187,8 @@ export function parseMatroska(data: Uint8Array, maxSamples = 240): MatroskaParse
     break;
   }
 
-  if (!codecPrivate || codecId !== 'V_MPEGH/ISO/HEVC') {
-    throw new Error(`Unsupported or missing Matroska HEVC video track: ${codecId || 'none'}.`);
+  if (!codecId) {
+    throw new Error('Matroska video track not found.');
   }
 
   const samples: Mp4Sample[] = [];
@@ -207,7 +207,8 @@ export function parseMatroska(data: Uint8Array, maxSamples = 240): MatroskaParse
 
   if (samples.length === 0) throw new Error('No Matroska video blocks found in the loaded prefix.');
 
-  const hevcConfig = parseHevcDecoderConfigRecord(codecPrivate, 'hev1');
+  const isHevc = codecId === 'V_MPEGH/ISO/HEVC';
+  const hevcConfig = isHevc && codecPrivate ? parseHevcDecoderConfigRecord(codecPrivate, 'hev1') : null;
   return {
     brands: ['matroska'],
     tracks: [{
@@ -217,9 +218,9 @@ export function parseMatroska(data: Uint8Array, maxSamples = 240): MatroskaParse
       duration: samples[samples.length - 1].dts + samples[samples.length - 1].duration,
       width,
       height,
-      codecType: 'hev1',
+      codecType: isHevc ? 'hev1' : codecId,
       hevcConfig,
-      hasDolbyVisionConfig: true,
+      hasDolbyVisionConfig: Boolean(hevcConfig),
       sampleCount: samples.length,
       samples,
     }],
