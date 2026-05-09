@@ -77,6 +77,7 @@ npm run test:rust
 - `/bench` also has diagnostic raw-frame preview controls: a time slider/seconds input plus Raw luma and PQ SDR approximation modes. Raw luma is the safer way to confirm decoded frames when DV P5 color appears green before RPU reshape is implemented.
 - `/bench` shows selected-time Frame/RPU alignment for parsed samples: sample index, timestamp, RPU count, and first RPU NAL bytes. Large MKV files are still prefix-parsed, so seeks beyond that parsed window report unknown/outside until streaming demux is implemented.
 - Compact DV metadata ABI is 276 `f32` values with WGSL `vec4` row padding. Keep `src/core/metadata.ts`, `crates/lumabridge_wasm/src/lib.rs`, and `src/gpu/dv-p5-to-sdr.wgsl` aligned.
+- `src/core/gpu-upload.ts` prepares tightly packed `u32` Y/U/V storage-buffer data from I420P10 frames for the current WGSL skeleton; it is not yet wired to a live `GPUDevice`.
 - Rust `parse_rpu_metadata` is currently a placeholder returning identity metadata for valid payloads. Full libdovi/dovi_tool-compatible parsing is still pending.
 - WGSL currently contains a skeleton/reference compute path, not libplacebo-accurate DV reshaping.
 
@@ -104,6 +105,7 @@ npm run test:rust
 - [ ] Copy real `VideoFrame` planes with `copyTo()` and upload Y/U/V data to WebGPU.
 - [ ] Replace Rust placeholder RPU parsing with full libdovi/dovi_tool-compatible metadata extraction.
 - [x] Define and freeze the compact metadata buffer ABI between Rust, TypeScript, and WGSL.
+- [x] Add deterministic I420P10 plane upload planning for WebGPU storage buffers.
 - [ ] Implement libplacebo-aligned DV polynomial/MMR reshape in WGSL.
 - [ ] Add real SDR frame readback and pixel-error comparison against `sdr_reference.png`.
 - [ ] Replace synthetic benchmark timings with measured demux/decode/copy/upload/shader/present timings.
