@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   bt2020ToBt709,
+  doviIptToLms,
+  doviLmsToBt2020,
   normalizeYuv10Sample,
   pqEotf,
   reinhardToneMap,
@@ -31,6 +33,17 @@ describe('color math references', () => {
     expect(mapped[0]).toBeGreaterThan(0.49);
     expect(mapped[1]).toBeGreaterThan(0.49);
     expect(mapped[2]).toBeGreaterThan(0.49);
+  });
+
+  it('keeps neutral Dolby Vision IPT/LMS values neutral', () => {
+    const lms = doviIptToLms([0.5, 0, 0]);
+    expect(lms[0]).toBeCloseTo(0.5);
+    expect(lms[1]).toBeCloseTo(0.5);
+    expect(lms[2]).toBeCloseTo(0.5);
+
+    const rgb2020 = doviLmsToBt2020(lms);
+    expect(rgb2020[0]).toBeCloseTo(rgb2020[1], 3);
+    expect(rgb2020[1]).toBeCloseTo(rgb2020[2], 3);
   });
 
   it('evaluates polynomial and MMR reshape references', () => {

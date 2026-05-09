@@ -74,7 +74,7 @@ npm run test:rust
 - `ffmpeg.wasm` is not the intended main 4K decode path. Prefer WebCodecs for decode and Rust/WASM for RPU/container support.
 - HDR10/PQ-only behavior is debug/fallback, not a valid DV P5 result.
 - Benchmark timings on `/bench` are synthetic until the real pipeline is connected. The page already supports selecting and previewing a local video via native `<video>`.
-- `/bench` also has diagnostic raw-frame preview controls: a time slider/seconds input plus Raw luma and PQ SDR approximation modes. Raw luma is the safer way to confirm decoded frames when DV P5 color appears green before RPU reshape is implemented.
+- `/bench` also has diagnostic raw-frame preview controls: a time slider/seconds input plus Raw luma, DV P5 base approximation, and PQ SDR approximation modes. Raw luma confirms decoded frame structure; DV P5 base approximation interprets the planes as IPT/PQ before RPU reshape; PQ SDR intentionally shows the incorrect HDR10-style path for comparison.
 - `/bench` shows selected-time Frame/RPU alignment for parsed samples: sample index, timestamp, RPU count, and first RPU NAL bytes. Large MKV files are still prefix-parsed, so seeks beyond that parsed window report unknown/outside until streaming demux is implemented.
 - When selected time is outside the parsed prefix and ffmpeg.wasm raw preview succeeds, `/bench` also tries a one-packet HEVC copy probe (`hevc_mp4toannexb`) at that time and scans the Annex-B packet for RPU NALs. This is diagnostic fallback, not the final demux strategy.
 - Compact DV metadata ABI is 276 `f32` values with WGSL `vec4` row padding. Keep `src/core/metadata.ts`, `crates/lumabridge_wasm/src/lib.rs`, and `src/gpu/dv-p5-to-sdr.wgsl` aligned.
@@ -99,6 +99,7 @@ npm run test:rust
 - [x] Add automatic ffmpeg.wasm first-frame I420P10 diagnostic decode and SDR debug preview.
 - [x] Add selectable timestamp controls for ffmpeg.wasm SDR debug preview frames.
 - [x] Add Raw luma diagnostic preview mode for DV P5 frames before RPU color processing.
+- [x] Add DV P5 base-layer approximation preview mode for greener-than-expected debug frames.
 - [x] Add selected-time sample/RPU alignment diagnostics on `/bench`.
 - [x] Add ffmpeg.wasm selected-time HEVC packet RPU probe for prefix-miss diagnostics.
 - [x] Report non-HEVC Matroska tracks as unsupported inputs instead of container parse failures.

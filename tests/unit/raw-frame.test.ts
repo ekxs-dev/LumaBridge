@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  convertI420P10ToDoviP5BasePreview,
   convertI420P10ToLumaPreview,
   convertI420P10ToSdrPreview,
   createI420P10Frame,
@@ -60,5 +61,22 @@ describe('raw I420P10 frame preview', () => {
     expect(preview.stats.nonBlackPixels).toBe(8);
     expect(preview.stats.averageRgb[0]).toBeCloseTo(preview.stats.averageRgb[1]);
     expect(preview.stats.averageRgb[1]).toBeCloseTo(preview.stats.averageRgb[2]);
+  });
+
+  it('renders a roughly neutral DV P5 base approximation from neutral IPT chroma', () => {
+    const data = new Uint8Array(expectedI420P10ByteLength(4, 2));
+    const frame = createI420P10Frame(data, 4, 2);
+    for (let index = 0; index < 8; index += 1) writeU16LE(data, frame.yOffset + index, 512);
+    for (let index = 0; index < 2; index += 1) {
+      writeU16LE(data, frame.uOffset + index, 512);
+      writeU16LE(data, frame.vOffset + index, 512);
+    }
+
+    const preview = convertI420P10ToDoviP5BasePreview(frame, 4);
+
+    expect(preview.stats.nonBlackPixels).toBe(8);
+    expect(Math.abs(preview.stats.averageRgb[0] - preview.stats.averageRgb[1])).toBeLessThan(4);
+    expect(Math.abs(preview.stats.averageRgb[1] - preview.stats.averageRgb[2])).toBeLessThan(4);
+    expect(preview.data[3]).toBe(255);
   });
 });

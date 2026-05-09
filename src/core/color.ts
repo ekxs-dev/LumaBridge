@@ -39,6 +39,24 @@ export function bt2020ToBt709(rgb: [number, number, number]): [number, number, n
   ];
 }
 
+export function doviIptToLms(ipt: [number, number, number]): [number, number, number] {
+  const [i, p, t] = ipt;
+  return [
+    i + 0.0975689 * p + 0.205226 * t,
+    i - 0.113876 * p + 0.133217 * t,
+    i + 0.0326151 * p - 0.676887 * t,
+  ];
+}
+
+export function doviLmsToBt2020(lms: [number, number, number]): [number, number, number] {
+  const [l, m, s] = lms;
+  return [
+    3.06441879 * l - 2.16597676 * m + 0.10155818 * s,
+    -0.65612108 * l + 1.78554118 * m - 0.12943749 * s,
+    0.01736321 * l - 0.04725154 * m + 1.03004253 * s,
+  ];
+}
+
 export function reshapePolynomial(signal: number, coeffs: [number, number, number]): number {
   return (coeffs[2] * signal + coeffs[1]) * signal + coeffs[0];
 }

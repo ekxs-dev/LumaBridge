@@ -34,6 +34,7 @@ test('benchmark page emits a JSON timing report', async ({ page }) => {
   await expect(page.locator('#frame-rpu-meta')).toContainText('not selected');
   await expect(page.locator('#gpu-upload-meta')).toContainText('waiting');
   await expect(page.locator('[data-preview-mode="raw-luma"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-preview-mode="dv-p5-base"]')).toBeVisible();
   await expect(page.locator('[data-preview-mode="sdr-approx"]')).toBeVisible();
   await expect(page.locator('#sdr-preview-meta')).toContainText('Debug preview waiting');
   await expect(page.locator('#ffmpeg-raw-probe')).toBeDisabled();

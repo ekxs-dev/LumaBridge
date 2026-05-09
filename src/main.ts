@@ -12,6 +12,7 @@ import { buildI420P10GpuUpload } from './core/gpu-upload';
 import { parseMediaFile, type ParsedMediaSource } from './core/media-source';
 import type { Mp4VideoTrack } from './core/mp4';
 import {
+  convertI420P10ToDoviP5BasePreview,
   convertI420P10ToLumaPreview,
   convertI420P10ToSdrPreview,
   createI420P10Frame,
@@ -211,6 +212,7 @@ function renderBench() {
           <canvas id="sdr-preview" class="sdr-preview" width="960" height="402" aria-label="SDR debug preview"></canvas>
           <div class="mode-toggle" role="group" aria-label="Preview mode">
             <button class="mode-button active" type="button" data-preview-mode="raw-luma">Raw luma</button>
+            <button class="mode-button" type="button" data-preview-mode="dv-p5-base">DV P5 base</button>
             <button class="mode-button" type="button" data-preview-mode="sdr-approx">PQ SDR approx</button>
           </div>
           <div class="preview-controls" aria-label="SDR preview time controls">
@@ -400,7 +402,15 @@ function renderBench() {
     return status === 'outside-parsed-samples' || status === 'invalid-sample';
   };
 
-  const previewModeLabel = (mode: RawPreviewMode) => (mode === 'raw-luma' ? 'Raw luma diagnostic' : 'PQ SDR approximation');
+  const previewModeLabel = (mode: RawPreviewMode) => {
+    if (mode === 'raw-luma') return 'Raw luma diagnostic';
+    if (mode === 'dv-p5-base') return 'DV P5 base approximation';
+    return 'PQ SDR approximation';
+  };
+
+  const isRawPreviewMode = (mode: string | undefined): mode is RawPreviewMode => (
+    mode === 'raw-luma' || mode === 'dv-p5-base' || mode === 'sdr-approx'
+  );
 
   const setPreviewMode = (mode: RawPreviewMode) => {
     previewMode = mode;
@@ -411,9 +421,9 @@ function renderBench() {
 
   const convertRawFrameForPreview = (data: Uint8Array, track: Mp4VideoTrack, mode: RawPreviewMode) => {
     const frame = createI420P10Frame(data, track.width, track.height, 'full');
-    return mode === 'raw-luma'
-      ? convertI420P10ToLumaPreview(frame)
-      : convertI420P10ToSdrPreview(frame);
+    if (mode === 'raw-luma') return convertI420P10ToLumaPreview(frame);
+    if (mode === 'dv-p5-base') return convertI420P10ToDoviP5BasePreview(frame);
+    return convertI420P10ToSdrPreview(frame);
   };
 
   const clearSdrPreview = () => {
@@ -811,7 +821,7 @@ function renderBench() {
   for (const button of previewModeButtons) {
     button.addEventListener('click', () => {
       const mode = button.dataset.previewMode;
-      if (mode !== 'raw-luma' && mode !== 'sdr-approx') return;
+      if (!isRawPreviewMode(mode)) return;
       setPreviewMode(mode);
 
       const track = activeTrack;
