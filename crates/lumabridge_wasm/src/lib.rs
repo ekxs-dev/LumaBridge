@@ -2,6 +2,8 @@ use dolby_vision::rpu::dovi_rpu::DoviRpu;
 use dolby_vision::rpu::rpu_data_mapping::DoviMappingMethod;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+#[cfg(feature = "wasm")]
+use wasm_bindgen::prelude::wasm_bindgen;
 
 pub const HEVC_NAL_DV_RPU: u8 = 62;
 pub const COMPACT_DOVI_FLOAT32_COUNT: usize = 276;
@@ -286,6 +288,14 @@ pub fn pack_metadata(metadata: &CompactDoviMetadata) -> [f32; COMPACT_DOVI_FLOAT
     pack_slice(&mut packed, COMPACT_DOVI_POLY_COEFFS_OFFSET, &metadata.poly_coeffs, 72);
     pack_slice(&mut packed, COMPACT_DOVI_MMR_COEFFS_OFFSET, &metadata.mmr_coeffs, 144);
     packed
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen(js_name = parseRpuMetadataPacked)]
+pub fn parse_rpu_metadata_packed_wasm(rpu_payload: &[u8]) -> Result<Vec<f32>, wasm_bindgen::JsValue> {
+    let metadata = parse_rpu_metadata(rpu_payload)
+        .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))?;
+    Ok(pack_metadata(&metadata).to_vec())
 }
 
 fn pack_vec4_rows(packed: &mut [f32], offset: usize, values: &[f32], row_count: usize, row_width: usize) {

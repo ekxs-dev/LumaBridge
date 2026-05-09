@@ -10,8 +10,10 @@
 ## Repository Layout
 - `src/main.ts`: Vite app entry. Home page and `/bench` page are currently implemented here.
 - `src/core/`: TypeScript capability checks, codec helpers, metadata packing, color math, and benchmark summaries.
+- `src/core/rpu-metadata.ts`: Lazy browser adapter for generated Rust/WASM RPU metadata packing.
 - `src/gpu/dv-p5-to-sdr.wgsl`: WGSL shader skeleton for YUV10/DV/PQ/tone mapping work.
 - `crates/lumabridge_wasm/`: Rust crate for HEVC NAL parsing, RPU extraction, metadata packing, and future libdovi integration.
+- `src/wasm/lumabridge_wasm/`: Generated wasm-bindgen browser package for the Rust RPU metadata parser.
 - `tests/unit/`: Vitest unit tests.
 - `tests/e2e/`: Playwright smoke/e2e tests.
 - `tests/fixtures/`: Small versioned media fixtures.
@@ -25,6 +27,7 @@
 - Start the dev server with `npm run dev`.
 - Open the benchmark page at `/bench`.
 - Run Rust tests with `npm run test:rust`.
+- Rebuild the generated Rust/WASM browser package with `npm run build:wasm`.
 - Regenerate fixtures with `npm run bench:fixtures`.
 - Override the source fixture file with:
 
@@ -79,8 +82,10 @@ npm run test:rust
 - When selected time is outside the parsed prefix and ffmpeg.wasm raw preview succeeds, `/bench` also tries a one-packet HEVC copy probe (`hevc_mp4toannexb`) at that time and scans the Annex-B packet for RPU NALs. This is diagnostic fallback, not the final demux strategy.
 - Compact DV metadata ABI is 276 `f32` values with WGSL `vec4` row padding. Keep `src/core/metadata.ts`, `crates/lumabridge_wasm/src/lib.rs`, and `src/gpu/dv-p5-to-sdr.wgsl` aligned.
 - `src/core/gpu-upload.ts` prepares tightly packed `u32` Y/U/V storage-buffer data plus source/output frame params from I420P10 frames. `/bench` attempts a live WebGPU buffer upload after ffmpeg.wasm raw-frame decode when WebGPU is available.
-- `src/core/webgpu-render.ts` runs the WGSL compute shader against the ffmpeg.wasm raw frame and reads back an RGBA8 SDR debug preview when WebGPU is available. This is still a debug render path until real RPU metadata is parsed and applied.
+- `src/core/rpu-metadata.ts` lazy-loads the generated Rust/WASM parser and converts selected-frame RPU NAL payloads into the 276-f32 compact shader metadata buffer. If parsing fails or no RPU payload is available, `/bench` falls back to identity metadata and reports that explicitly.
+- `src/core/webgpu-render.ts` runs the WGSL compute shader against the ffmpeg.wasm raw frame and reads back an RGBA8 SDR debug preview when WebGPU is available. It now accepts packed RPU metadata, but the WGSL reshape math is still simplified/debug quality.
 - Rust `parse_rpu_metadata` now uses the MIT `dolby_vision` crate to parse real HEVC type-62 RPU payloads and fill compact metadata with Dolby matrices, offsets, source PQ, pivots, and polynomial/MMR coefficient slots. It is still pending final libplacebo parity for pivot interpretation, per-piece method/order packing, and shader application.
+- The browser WASM package is built with rustup stable + `wasm32-unknown-unknown` and `wasm-bindgen-cli` 0.2.121 via `npm run build:wasm`.
 - WGSL currently contains a debug compute path and simplified preview modes, not libplacebo-accurate DV reshaping.
 
 ## PR / Commit Guidance
@@ -108,6 +113,8 @@ npm run test:rust
 - [ ] Validate real `VideoFrame.format === "I420P10"` and `VideoFrame.colorSpace`.
 - [ ] Copy real `VideoFrame` planes with `copyTo()` and upload Y/U/V data to WebGPU.
 - [x] Replace Rust placeholder RPU parsing with real `dolby_vision` crate-backed metadata extraction.
+- [x] Generate browser WASM bindings for the Rust RPU parser and load them from TypeScript.
+- [x] Pass selected-frame packed RPU metadata into WebGPU render diagnostics when available.
 - [ ] Validate RPU pivot/method/MMR packing against FFmpeg/libplacebo for all compact metadata slots.
 - [x] Define and freeze the compact metadata buffer ABI between Rust, TypeScript, and WGSL.
 - [x] Add deterministic I420P10 plane upload planning for WebGPU storage buffers.

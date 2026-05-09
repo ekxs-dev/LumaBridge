@@ -18,6 +18,7 @@ describe('RPU frame alignment', () => {
     expect(selection.durationUs).toBe(40_000);
     expect(selection.rpuNalUnits).toBe(1);
     expect(selection.firstRpuNalHex).toMatch(/^7c /);
+    expect(selection.firstRpuPayload?.byteLength).toBe(selection.firstRpuNalSize);
   });
 
   it('reports when a requested time is beyond parsed samples', () => {
@@ -38,5 +39,6 @@ describe('RPU frame alignment', () => {
     expect(selection.timestampUs).toBe(120_000_000);
     expect(selection.rpuNalUnits).toBe(1);
     expect(selection.firstRpuNalHex).toMatch(/^7c /);
+    expect(selection.firstRpuPayload?.byteLength).toBe(selection.firstRpuNalSize);
   });
 });

@@ -20,6 +20,7 @@ import {
   type SdrPreviewImage,
 } from './core/raw-frame';
 import { inspectRpuAnnexBPacket, inspectRpuForSeconds, type RpuFrameSelection } from './core/rpu-alignment';
+import { parseRpuMetadataForShader, type RpuMetadataProbe } from './core/rpu-metadata';
 import { renderI420P10SdrWithWebGpu, type WebGpuSdrRenderProbe } from './core/webgpu-render';
 import { uploadI420P10ToWebGpu, type WebGpuUploadProbe } from './core/webgpu-upload';
 import type { DecodedFrameProbe } from './core/webcodecs';
@@ -132,6 +133,7 @@ function renderBench() {
     webCodecs: null as DecodedFrameProbe | null,
     decoderAdapter: null as DecoderAdapterProbe | null,
     frameRpu: null as RpuFrameSelection | null,
+    rpuMetadata: null as RpuMetadataProbe | null,
     gpuUpload: null as WebGpuUploadProbe | null,
     gpuRender: null as WebGpuSdrRenderProbe | null,
     sdrPreview: null as null | {
@@ -284,14 +286,19 @@ function renderBench() {
   const updateReport = () => {
     if (reportJson) {
       reportJson.textContent = JSON.stringify(report, (key, value: unknown) => {
-        if (key === 'data' && value instanceof Uint8Array) return `<${value.byteLength} bytes>`;
+        if ((key === 'data' || key === 'firstRpuPayload') && value instanceof Uint8Array) return `<${value.byteLength} bytes>`;
         return value;
       }, 2);
     }
   };
 
   const updateFrameRpuMeta = (selection: RpuFrameSelection | null) => {
-    report.frameRpu = selection;
+    report.frameRpu = selection
+      ? {
+          ...selection,
+          firstRpuPayload: selection.firstRpuPayload ? new Uint8Array(selection.firstRpuPayload) : null,
+        }
+      : null;
     if (!frameRpuMeta) return;
     if (!selection) {
       frameRpuMeta.innerHTML = `
@@ -317,11 +324,20 @@ function renderBench() {
     const firstNal = selection.firstRpuNalHex
       ? `${selection.firstRpuNalSize} bytes at ${selection.firstRpuNalOffset}: ${selection.firstRpuNalHex}`
       : 'none';
+    const metadata = report.rpuMetadata;
+    const metadataLabel = metadata
+      ? metadata.source === 'wasm' && metadata.ok
+        ? `wasm parsed, PQ ${metadata.sourceMinPq?.toFixed(4)}-${metadata.sourceMaxPq?.toFixed(4)}`
+        : `${metadata.source}${metadata.error ? `: ${metadata.error}` : ''}`
+      : selection.firstRpuPayload
+        ? 'waiting for render'
+        : 'not available';
     frameRpuMeta.innerHTML = `
       <dt>time</dt><dd>${selection.requestedSeconds.toFixed(3)} s</dd>
       <dt>sample</dt><dd>${sample}</dd>
       <dt>RPU</dt><dd>${selection.status}${selection.rpuNalUnits ? `, ${selection.rpuNalUnits} NAL` : ''}</dd>
       <dt>first NAL</dt><dd>${firstNal}</dd>
+      <dt>metadata</dt><dd>${metadataLabel}</dd>
       ${selection.error ? `<dt>note</dt><dd>${selection.error}</dd>` : ''}
     `;
   };
@@ -360,6 +376,7 @@ function renderBench() {
       <dt>status</dt><dd>${probe.ok ? `rendered ${probe.width} x ${probe.height}` : probe.attempted ? 'failed' : 'unavailable'}${probe.elapsedMs ? ` in ${probe.elapsedMs.toFixed(1)} ms` : ''}</dd>
       <dt>shader</dt><dd>${probe.shaderElapsedMs ? `${probe.shaderElapsedMs.toFixed(1)} ms` : 'not run'}</dd>
       <dt>readback</dt><dd>${probe.readbackElapsedMs ? `${probe.readbackElapsedMs.toFixed(1)} ms` : 'not run'}</dd>
+      <dt>metadata</dt><dd>${probe.metadataSource}</dd>
       ${probe.averageRgb ? `<dt>avg RGB</dt><dd>${probe.averageRgb.map((value) => value.toFixed(1)).join(', ')}</dd>` : ''}
       ${probe.error ? `<dt>note</dt><dd>${probe.error}</dd>` : ''}
     `;
@@ -537,7 +554,14 @@ function renderBench() {
     updateGpuUploadMeta(await uploadI420P10ToWebGpu(gpuUpload));
     if (version !== selectionVersion) return;
 
-    const gpuRender = await renderI420P10SdrWithWebGpu(gpuUpload, mode);
+    const metadata = await parseRpuMetadataForShader(report.frameRpu?.firstRpuPayload ?? null);
+    if (version !== selectionVersion) return;
+    report.rpuMetadata = metadata.probe;
+    updateFrameRpuMeta(report.frameRpu);
+
+    const gpuRender = await renderI420P10SdrWithWebGpu(gpuUpload, mode, {
+      doviMetadata: metadata.probe.ok && metadata.probe.source === 'wasm' ? metadata.packed : undefined,
+    });
     if (version !== selectionVersion) return;
     updateGpuRenderMeta(gpuRender.probe);
     if (gpuRender.preview) {
@@ -608,6 +632,7 @@ function renderBench() {
         firstRpuNalOffset: null,
         firstRpuNalSize: null,
         firstRpuNalHex: null,
+        firstRpuPayload: null,
         error: 'Parsed prefix does not cover this time; probing selected HEVC packet with ffmpeg.wasm.',
       });
       updateReport();
@@ -630,6 +655,7 @@ function renderBench() {
           firstRpuNalOffset: null,
           firstRpuNalSize: null,
           firstRpuNalHex: null,
+          firstRpuPayload: null,
           error: packetProbe.error ?? 'ffmpeg.wasm HEVC packet probe failed.',
         });
       }
@@ -767,6 +793,7 @@ function renderBench() {
     report.webCodecs = null;
     report.decoderAdapter = null;
     report.frameRpu = null;
+    report.rpuMetadata = null;
     report.gpuUpload = null;
     report.gpuRender = null;
     report.sdrPreview = null;
@@ -932,7 +959,7 @@ function renderBench() {
 
   document.querySelector('#export-report')?.addEventListener('click', () => {
     const blob = new Blob([JSON.stringify(report, (key, value: unknown) => {
-      if (key === 'data' && value instanceof Uint8Array) return `<${value.byteLength} bytes>`;
+      if ((key === 'data' || key === 'firstRpuPayload') && value instanceof Uint8Array) return `<${value.byteLength} bytes>`;
       return value;
     }, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);

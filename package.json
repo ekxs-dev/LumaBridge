@@ -10,6 +10,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:rust": "cargo test --manifest-path crates/lumabridge_wasm/Cargo.toml",
+    "build:wasm": "node scripts/build-wasm.mjs",
     "bench:fixtures": "node scripts/generate-fixtures.mjs",
     "ci": "npm run test && npm run build && npm run test:e2e"
   },

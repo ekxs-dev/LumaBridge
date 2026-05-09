@@ -56,6 +56,7 @@ export interface WebGpuSdrRenderProbe {
   width: number | null;
   height: number | null;
   mode: RawPreviewMode | null;
+  metadataSource: 'identity' | 'rpu-packed';
   averageRgb: [number, number, number] | null;
   nonBlackPixels: number | null;
   error: string | null;
@@ -64,6 +65,10 @@ export interface WebGpuSdrRenderProbe {
 export interface WebGpuSdrRenderResult {
   probe: WebGpuSdrRenderProbe;
   preview: SdrPreviewImage | null;
+}
+
+export interface WebGpuSdrRenderOptions {
+  doviMetadata?: Float32Array;
 }
 
 function emptyProbe(error: string): WebGpuSdrRenderResult {
@@ -79,6 +84,7 @@ function emptyProbe(error: string): WebGpuSdrRenderResult {
       width: null,
       height: null,
       mode: null,
+      metadataSource: 'identity',
       averageRgb: null,
       nonBlackPixels: null,
       error,
@@ -118,7 +124,11 @@ function computeStats(pixels: Uint8ClampedArray): SdrPreviewImage['stats'] {
   };
 }
 
-export async function renderI420P10SdrWithWebGpu(upload: I420P10GpuUpload, mode: RawPreviewMode): Promise<WebGpuSdrRenderResult> {
+export async function renderI420P10SdrWithWebGpu(
+  upload: I420P10GpuUpload,
+  mode: RawPreviewMode,
+  options: WebGpuSdrRenderOptions = {},
+): Promise<WebGpuSdrRenderResult> {
   if (typeof navigator === 'undefined' || !('gpu' in navigator)) {
     return emptyProbe('WebGPU is unavailable in this environment.');
   }
@@ -157,7 +167,8 @@ export async function renderI420P10SdrWithWebGpu(upload: I420P10GpuUpload, mode:
     const uniformUsage = bufferUsage.UNIFORM | bufferUsage.COPY_DST;
     const outputUsage = bufferUsage.STORAGE | bufferUsage.COPY_SRC;
     const readbackUsage = bufferUsage.MAP_READ | bufferUsage.COPY_DST;
-    const doviUniform = new Uint8Array(packCompactDoviMetadata(createIdentityDoviMetadata()));
+    const doviMetadata = options.doviMetadata ?? new Float32Array(packCompactDoviMetadata(createIdentityDoviMetadata()));
+    const doviUniform = new Uint8Array(doviMetadata.buffer, doviMetadata.byteOffset, doviMetadata.byteLength);
 
     const yBuffer = createAndWriteBuffer(device, storageUsage, upload.yPlane);
     const uBuffer = createAndWriteBuffer(device, storageUsage, upload.uPlane);
@@ -222,6 +233,7 @@ export async function renderI420P10SdrWithWebGpu(upload: I420P10GpuUpload, mode:
         width,
         height,
         mode,
+        metadataSource: options.doviMetadata ? 'rpu-packed' : 'identity',
         averageRgb: stats.averageRgb,
         nonBlackPixels: stats.nonBlackPixels,
         error: null,
@@ -246,6 +258,7 @@ export async function renderI420P10SdrWithWebGpu(upload: I420P10GpuUpload, mode:
         width,
         height,
         mode,
+        metadataSource: options.doviMetadata ? 'rpu-packed' : 'identity',
         averageRgb: null,
         nonBlackPixels: null,
         error: error instanceof Error ? error.message : String(error),

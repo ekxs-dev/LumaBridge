@@ -59,6 +59,7 @@ test('benchmark page parses a selected MP4 fixture', async ({ page }) => {
   await expect(page.locator('#track-meta')).toContainText('154 total');
   await expect(page.locator('#frame-rpu-meta')).toContainText('present');
   await expect(page.locator('#frame-rpu-meta')).toContainText('#0');
+  await expect(page.locator('#frame-rpu-meta')).toContainText(/metadata/);
   await expect(page.locator('#decode-meta')).not.toContainText('not run');
   await expect(page.locator('#ffmpeg-raw-probe')).toBeVisible();
   await expect(page.locator('#sdr-preview-time')).toBeVisible();
@@ -76,6 +77,7 @@ test('benchmark page parses a selected MP4 fixture', async ({ page }) => {
   expect(finalParsed.mp4.track.totalRpuNalUnits).toBe(154);
   expect(finalParsed.webCodecs).not.toBeNull();
   expect(finalParsed.webCodecs).toHaveProperty('copyTo');
+  expect(finalParsed).toHaveProperty('rpuMetadata');
 });
 
 test('benchmark page parses a selected MKV fixture without MP4 moov failure', async ({ page }) => {

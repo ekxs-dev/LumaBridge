@@ -19,6 +19,7 @@ export interface RpuFrameSelection {
   firstRpuNalOffset: number | null;
   firstRpuNalSize: number | null;
   firstRpuNalHex: string | null;
+  firstRpuPayload: Uint8Array | null;
   error: string | null;
 }
 
@@ -76,6 +77,7 @@ export function inspectRpuForSeconds(data: Uint8Array, track: Mp4VideoTrack, sec
       firstRpuNalOffset: null,
       firstRpuNalSize: null,
       firstRpuNalHex: null,
+      firstRpuPayload: null,
       error: null,
     };
   }
@@ -93,6 +95,7 @@ export function inspectRpuForSeconds(data: Uint8Array, track: Mp4VideoTrack, sec
       firstRpuNalOffset: null,
       firstRpuNalSize: null,
       firstRpuNalHex: null,
+      firstRpuPayload: null,
       error: 'HEVC length size is missing.',
     };
   }
@@ -109,6 +112,7 @@ export function inspectRpuForSeconds(data: Uint8Array, track: Mp4VideoTrack, sec
       firstRpuNalOffset: null,
       firstRpuNalSize: null,
       firstRpuNalHex: null,
+      firstRpuPayload: null,
       error: 'Sample bytes are outside the parsed prefix window.',
     };
   }
@@ -133,6 +137,9 @@ export function inspectRpuForSeconds(data: Uint8Array, track: Mp4VideoTrack, sec
       firstRpuNalOffset,
       firstRpuNalSize,
       firstRpuNalHex,
+      firstRpuPayload: firstRpu && firstRpuNalOffset != null
+        ? data.slice(firstRpuNalOffset, firstRpuNalOffset + firstRpu.size)
+        : null,
       error: null,
     };
   } catch (error) {
@@ -147,6 +154,7 @@ export function inspectRpuForSeconds(data: Uint8Array, track: Mp4VideoTrack, sec
       firstRpuNalOffset: null,
       firstRpuNalSize: null,
       firstRpuNalHex: null,
+      firstRpuPayload: null,
       error: error instanceof Error ? error.message : String(error),
     };
   }
@@ -171,6 +179,7 @@ export function inspectRpuAnnexBPacket(data: Uint8Array, seconds: number): RpuFr
       firstRpuNalOffset: firstRpu?.payloadOffset ?? null,
       firstRpuNalSize: firstRpu?.size ?? null,
       firstRpuNalHex,
+      firstRpuPayload: firstRpu ? data.slice(firstRpu.payloadOffset, firstRpu.payloadOffset + firstRpu.size) : null,
       error: null,
     };
   } catch (error) {
@@ -185,6 +194,7 @@ export function inspectRpuAnnexBPacket(data: Uint8Array, seconds: number): RpuFr
       firstRpuNalOffset: null,
       firstRpuNalSize: null,
       firstRpuNalHex: null,
+      firstRpuPayload: null,
       error: error instanceof Error ? error.message : String(error),
     };
   }
