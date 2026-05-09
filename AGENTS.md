@@ -84,6 +84,7 @@ npm run test:rust
 - If changing public test fixtures, update `tests/README.md` and the golden assertions together.
 
 ## TODO
+- [x] Add real MP4 track/sample metadata parser for benchmark file selection.
 - [ ] Implement real MP4/MKV demux for HEVC samples and codec string extraction.
 - [ ] Feed demuxed samples into WebCodecs `VideoDecoder`.
 - [ ] Validate real `VideoFrame.format === "I420P10"` and `VideoFrame.colorSpace`.

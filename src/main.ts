@@ -1,6 +1,7 @@
 import './styles/app.css';
 import { createSyntheticBenchmark, summarizeBenchmark } from './core/benchmark';
 import { evaluateCapabilities, probeBrowserCapabilities } from './core/capabilities';
+import { parseMp4, type Mp4VideoTrack } from './core/mp4';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -83,6 +84,24 @@ function renderBench() {
       width: number | null;
       height: number | null;
     },
+    mp4: null as null | {
+      brands: string[];
+      track: {
+        id: number;
+        codecType: string;
+        codecString: string | null;
+        width: number;
+        height: number;
+        timescale: number;
+        durationSeconds: number;
+        sampleCount: number;
+        syncSamples: number;
+        firstSampleBytes: number;
+        hasDolbyVisionConfig: boolean;
+        lengthSize: number | null;
+      };
+    },
+    parseError: null as string | null,
     summary,
   };
   const rows = Object.entries(summary.stages)
@@ -111,6 +130,13 @@ function renderBench() {
             <dt>size</dt><dd>0 MB</dd>
             <dt>duration</dt><dd>unknown</dd>
             <dt>resolution</dt><dd>unknown</dd>
+          </dl>
+          <h2 class="subhead">Track analysis</h2>
+          <dl class="debug-list compact" id="track-meta">
+            <dt>container</dt><dd>waiting for file</dd>
+            <dt>codec</dt><dd>unknown</dd>
+            <dt>samples</dt><dd>0</dd>
+            <dt>DV config</dt><dd>unknown</dd>
           </dl>
         </div>
         <div class="video-frame">
@@ -144,13 +170,42 @@ function renderBench() {
   const fileInput = document.querySelector<HTMLInputElement>('#video-file');
   const selectedName = document.querySelector<HTMLElement>('#selected-name');
   const videoMeta = document.querySelector<HTMLElement>('#video-meta');
+  const trackMeta = document.querySelector<HTMLElement>('#track-meta');
   const reportJson = document.querySelector<HTMLElement>('#report-json');
 
   const updateReport = () => {
     if (reportJson) reportJson.textContent = JSON.stringify(report, null, 2);
   };
 
-  fileInput?.addEventListener('change', () => {
+  const updateTrackMeta = (track: Mp4VideoTrack | null, brands: string[] = [], error: string | null = null) => {
+    if (!trackMeta) return;
+    if (error) {
+      trackMeta.innerHTML = `
+        <dt>container</dt><dd>parse failed</dd>
+        <dt>codec</dt><dd>${error}</dd>
+        <dt>samples</dt><dd>0</dd>
+        <dt>DV config</dt><dd>unknown</dd>
+      `;
+      return;
+    }
+    if (!track) {
+      trackMeta.innerHTML = `
+        <dt>container</dt><dd>not MP4 or no video track</dd>
+        <dt>codec</dt><dd>unknown</dd>
+        <dt>samples</dt><dd>0</dd>
+        <dt>DV config</dt><dd>unknown</dd>
+      `;
+      return;
+    }
+    trackMeta.innerHTML = `
+      <dt>container</dt><dd>${brands.join(', ') || 'mp4'}</dd>
+      <dt>codec</dt><dd>${track.hevcConfig?.codecString ?? track.codecType}</dd>
+      <dt>samples</dt><dd>${track.sampleCount} (${track.samples.filter((sample) => sample.isSync).length} sync)</dd>
+      <dt>DV config</dt><dd>${track.hasDolbyVisionConfig ? 'dvcC/dvvC present' : 'not present'}</dd>
+    `;
+  };
+
+  fileInput?.addEventListener('change', async () => {
     const file = fileInput.files?.[0];
     if (!file || !video) return;
 
@@ -166,6 +221,8 @@ function renderBench() {
       width: null,
       height: null,
     };
+    report.mp4 = null;
+    report.parseError = null;
 
     if (videoMeta) {
       videoMeta.innerHTML = `
@@ -174,6 +231,34 @@ function renderBench() {
         <dt>duration</dt><dd>reading metadata</dd>
         <dt>resolution</dt><dd>reading metadata</dd>
       `;
+    }
+
+    try {
+      const parsed = parseMp4(new Uint8Array(await file.arrayBuffer()));
+      const track = parsed.tracks[0] ?? null;
+      if (track) {
+        report.mp4 = {
+          brands: parsed.brands,
+          track: {
+            id: track.id,
+            codecType: track.codecType,
+            codecString: track.hevcConfig?.codecString ?? null,
+            width: track.width,
+            height: track.height,
+            timescale: track.timescale,
+            durationSeconds: track.timescale > 0 ? track.duration / track.timescale : 0,
+            sampleCount: track.sampleCount,
+            syncSamples: track.samples.filter((sample) => sample.isSync).length,
+            firstSampleBytes: track.samples[0]?.size ?? 0,
+            hasDolbyVisionConfig: track.hasDolbyVisionConfig,
+            lengthSize: track.hevcConfig?.lengthSize ?? null,
+          },
+        };
+      }
+      updateTrackMeta(track, parsed.brands);
+    } catch (error) {
+      report.parseError = error instanceof Error ? error.message : String(error);
+      updateTrackMeta(null, [], report.parseError);
     }
     updateReport();
   });
