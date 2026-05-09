@@ -1,0 +1,27 @@
+{
+  "name": "lumabridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -p tsconfig.json && vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:rust": "cargo test --manifest-path crates/lumabridge_wasm/Cargo.toml",
+    "bench:fixtures": "node scripts/generate-fixtures.mjs",
+    "ci": "npm run test && npm run build && npm run test:e2e"
+  },
+  "dependencies": {
+    "pngjs": "^7.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "@types/node": "^24.10.2",
+    "jsdom": "^27.3.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.7",
+    "vitest": "^4.0.16"
+  }
+}

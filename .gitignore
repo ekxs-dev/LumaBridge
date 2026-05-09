@@ -1,0 +1,11 @@
+source/
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+.vite/
+target/
+crates/**/target/
+pkg/
+*.log

@@ -1,0 +1,73 @@
+{
+  "source": "tests/fixtures/dv_p5_short.mp4",
+  "generatedBy": "ffmpeg elementary stream scan",
+  "codec": "hevc-main10-dv-profile5",
+  "dvProfile": 5,
+  "colorRange": "full",
+  "expectedFrameRate": 25,
+  "nalUnitCounts": {
+    "0": 75,
+    "1": 77,
+    "20": 2,
+    "32": 4,
+    "33": 4,
+    "34": 4,
+    "35": 154,
+    "39": 158,
+    "62": 154
+  },
+  "rpuCount": 154,
+  "firstRpuNalUnits": [
+    {
+      "index": 0,
+      "nalType": 62,
+      "offset": 4760,
+      "size": 299
+    },
+    {
+      "index": 1,
+      "nalType": 62,
+      "offset": 7501,
+      "size": 299
+    },
+    {
+      "index": 2,
+      "nalType": 62,
+      "offset": 7979,
+      "size": 299
+    },
+    {
+      "index": 3,
+      "nalType": 62,
+      "offset": 9081,
+      "size": 299
+    },
+    {
+      "index": 4,
+      "nalType": 62,
+      "offset": 9616,
+      "size": 299
+    },
+    {
+      "index": 5,
+      "nalType": 62,
+      "offset": 10152,
+      "size": 299
+    },
+    {
+      "index": 6,
+      "nalType": 62,
+      "offset": 11977,
+      "size": 299
+    },
+    {
+      "index": 7,
+      "nalType": 62,
+      "offset": 13423,
+      "size": 299
+    }
+  ],
+  "metadataSchemaVersion": 1,
+  "compactMetadataFloat32Count": 256,
+  "note": "This golden verifies RPU extraction/counting. Full libdovi field decoding plugs into the same schema later."
+}
