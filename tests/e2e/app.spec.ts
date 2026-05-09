@@ -47,17 +47,21 @@ test('benchmark page parses a selected MP4 fixture', async ({ page }) => {
   await expect(page.locator('#track-meta')).toContainText('154 (2 sync)');
   await expect(page.locator('#track-meta')).toContainText('154 total');
   await expect(page.locator('#decode-meta')).not.toContainText('not run');
-  await expect(page.locator('#ffmpeg-raw-probe')).toBeEnabled();
+  await expect(page.locator('#ffmpeg-raw-probe')).toBeVisible();
 
+  await expect.poll(async () => {
+    const report = await page.locator('#report-json').textContent();
+    return Boolean(JSON.parse(report ?? '{}').webCodecs);
+  }).toBe(true);
   const report = await page.locator('#report-json').textContent();
-  const parsed = JSON.parse(report ?? '{}');
-  expect(parsed.selectedVideo.name).toBe('dv_p5_short.mp4');
-  expect(parsed.mp4.container).toBe('mp4');
-  expect(parsed.mp4.track.sampleCount).toBe(154);
-  expect(parsed.mp4.track.codecType).toBe('hev1');
-  expect(parsed.mp4.track.totalRpuNalUnits).toBe(154);
-  expect(parsed.webCodecs).not.toBeNull();
-  expect(parsed.webCodecs).toHaveProperty('copyTo');
+  const finalParsed = JSON.parse(report ?? '{}');
+  expect(finalParsed.selectedVideo.name).toBe('dv_p5_short.mp4');
+  expect(finalParsed.mp4.container).toBe('mp4');
+  expect(finalParsed.mp4.track.sampleCount).toBe(154);
+  expect(finalParsed.mp4.track.codecType).toBe('hev1');
+  expect(finalParsed.mp4.track.totalRpuNalUnits).toBe(154);
+  expect(finalParsed.webCodecs).not.toBeNull();
+  expect(finalParsed.webCodecs).toHaveProperty('copyTo');
 });
 
 test('benchmark page parses a selected MKV fixture without MP4 moov failure', async ({ page }) => {
@@ -69,7 +73,7 @@ test('benchmark page parses a selected MKV fixture without MP4 moov failure', as
   await expect(page.locator('#track-meta')).toContainText('154 total');
   await expect(page.locator('#track-meta')).not.toContainText('MP4 moov box not found');
   await expect(page.locator('#decode-meta')).not.toContainText('not run');
-  await expect(page.locator('#ffmpeg-raw-probe')).toBeEnabled();
+  await expect(page.locator('#ffmpeg-raw-probe')).toBeVisible();
 
   const report = await page.locator('#report-json').textContent();
   const parsed = JSON.parse(report ?? '{}');

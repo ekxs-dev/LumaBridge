@@ -213,6 +213,7 @@ function renderBench() {
   const sdrPreviewCanvas = document.querySelector<HTMLCanvasElement>('#sdr-preview');
   const sdrPreviewMeta = document.querySelector<HTMLElement>('#sdr-preview-meta');
   let activeTrack: Mp4VideoTrack | null = null;
+  let selectionVersion = 0;
 
   const updateReport = () => {
     if (reportJson) {
@@ -228,12 +229,19 @@ function renderBench() {
     const ctx = sdrPreviewCanvas.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, sdrPreviewCanvas.width, sdrPreviewCanvas.height);
-    if (sdrPreviewMeta) {
-      sdrPreviewMeta.innerHTML = `
-        <span>SDR debug preview waiting</span>
-        <span>ffmpeg.wasm I420P10 → CPU PQ/BT.2020 approximation</span>
-      `;
-    }
+    updateSdrPreviewStatus([
+      'SDR debug preview waiting',
+      'ffmpeg.wasm I420P10 -> CPU PQ/BT.2020 approximation',
+    ]);
+  };
+
+  const updateSdrPreviewStatus = (items: string[]) => {
+    if (!sdrPreviewMeta) return;
+    sdrPreviewMeta.replaceChildren(...items.map((item) => {
+      const span = document.createElement('span');
+      span.textContent = item;
+      return span;
+    }));
   };
 
   const drawSdrPreview = (preview: SdrPreviewImage) => {
@@ -255,6 +263,55 @@ function renderBench() {
         <span>avg RGB ${preview.stats.averageRgb.map((value) => value.toFixed(1)).join(', ')}</span>
         <span>${preview.stats.nonBlackPixels} non-black pixels</span>
       `;
+    }
+  };
+
+  const runFfmpegRawPreview = async (file: File, track: Mp4VideoTrack, version: number, reason: string) => {
+    if (!report.decoderAdapter) {
+      report.decoderAdapter = {
+        selected: 'ffmpeg.wasm',
+        status: 'fallback-needed',
+        webCodecs: report.webCodecs,
+        ffmpegWasm: null,
+        fallbackReason: reason,
+      };
+    }
+
+    if (ffmpegRawProbe) {
+      ffmpegRawProbe.disabled = true;
+      ffmpegRawProbe.textContent = 'Rendering first SDR frame...';
+    }
+    updateSdrPreviewStatus([
+      'Decoding first I420P10 frame with ffmpeg.wasm',
+      `${track.width} x ${track.height}`,
+      'Rendering SDR debug preview',
+    ]);
+    updateReport();
+
+    const ffmpegWasm = await probeFfmpegWasmAdapter(file, track, { decodeFirstFrame: true });
+    if (version !== selectionVersion) return;
+
+    report.decoderAdapter.ffmpegWasm = ffmpegWasm;
+    report.decoderAdapter.selected = ffmpegWasm.available ? 'ffmpeg.wasm' : report.decoderAdapter.selected;
+    report.decoderAdapter.status = ffmpegWasm.rawFrame.ok ? 'fallback-available' : 'failed';
+    report.decoderAdapter.fallbackReason ??= reason;
+
+    const rawFrame = ffmpegWasm.rawFrame;
+    if (rawFrame.ok && rawFrame.data) {
+      const preview = convertI420P10ToSdrPreview(createI420P10Frame(rawFrame.data, track.width, track.height, 'full'));
+      drawSdrPreview(preview);
+    } else {
+      updateSdrPreviewStatus([
+        'SDR debug preview failed',
+        rawFrame.error ?? ffmpegWasm.error ?? 'Unknown ffmpeg.wasm error',
+      ]);
+    }
+
+    updateDecodeMeta(report.decoderAdapter);
+    updateReport();
+    if (ffmpegRawProbe) {
+      ffmpegRawProbe.textContent = 'Probe ffmpeg.wasm raw frame';
+      ffmpegRawProbe.disabled = false;
     }
   };
 
@@ -362,6 +419,8 @@ function renderBench() {
   fileInput?.addEventListener('change', async () => {
     const file = fileInput.files?.[0];
     if (!file || !video) return;
+    selectionVersion += 1;
+    const version = selectionVersion;
 
     if (objectUrl) URL.revokeObjectURL(objectUrl);
     objectUrl = URL.createObjectURL(file);
@@ -384,6 +443,7 @@ function renderBench() {
     if (ffmpegRawProbe) ffmpegRawProbe.disabled = true;
     clearSdrPreview();
     updateDecodeMeta(null);
+    updateReport();
 
     if (videoMeta) {
       videoMeta.innerHTML = `
@@ -434,12 +494,17 @@ function renderBench() {
         firstSampleRpuNalUnits: firstSampleAnalysis.rpuNalUnits.length,
         totalRpuNalUnits: fullAnalysis.rpuNalUnits.length,
       } : null, parsed);
+      updateReport();
       if (track?.hevcConfig) {
         updateDecodeMeta(null, true);
         report.decoderAdapter = await probeDecoderAdapters(parsed.bytes, track, file);
+        if (version !== selectionVersion) return;
         report.webCodecs = report.decoderAdapter.webCodecs;
         if (ffmpegRawProbe) ffmpegRawProbe.disabled = false;
         updateDecodeMeta(report.decoderAdapter);
+        if (report.decoderAdapter.selected === 'ffmpeg.wasm' && report.decoderAdapter.ffmpegWasm?.available) {
+          void runFfmpegRawPreview(file, track, version, 'Automatic ffmpeg.wasm raw-frame probe after WebCodecs fallback.');
+        }
       } else if (track) {
         updateDecodeSkipped(track);
       }
@@ -455,30 +520,7 @@ function renderBench() {
     const file = fileInput?.files?.[0];
     const track = activeTrack;
     if (!file || !track) return;
-    ffmpegRawProbe.disabled = true;
-    ffmpegRawProbe.textContent = 'Probing ffmpeg.wasm raw frame...';
-    if (!report.decoderAdapter) {
-      report.decoderAdapter = {
-        selected: 'ffmpeg.wasm',
-        status: 'fallback-needed',
-        webCodecs: report.webCodecs,
-        ffmpegWasm: null,
-        fallbackReason: 'Manual ffmpeg.wasm raw-frame probe requested.',
-      };
-    }
-    report.decoderAdapter.ffmpegWasm = await probeFfmpegWasmAdapter(file, track, { decodeFirstFrame: true });
-    report.decoderAdapter.selected = report.decoderAdapter.ffmpegWasm.available ? 'ffmpeg.wasm' : report.decoderAdapter.selected;
-    report.decoderAdapter.status = report.decoderAdapter.ffmpegWasm.rawFrame.ok ? 'fallback-available' : 'failed';
-    report.decoderAdapter.fallbackReason ??= 'Manual ffmpeg.wasm raw-frame probe requested.';
-    const rawFrame = report.decoderAdapter.ffmpegWasm.rawFrame;
-    if (rawFrame.ok && rawFrame.data) {
-      const preview = convertI420P10ToSdrPreview(createI420P10Frame(rawFrame.data, track.width, track.height, 'full'));
-      drawSdrPreview(preview);
-    }
-    updateDecodeMeta(report.decoderAdapter);
-    updateReport();
-    ffmpegRawProbe.textContent = 'Probe ffmpeg.wasm raw frame';
-    ffmpegRawProbe.disabled = false;
+    await runFfmpegRawPreview(file, track, selectionVersion, 'Manual ffmpeg.wasm raw-frame probe requested.');
   });
 
   video?.addEventListener('loadedmetadata', () => {

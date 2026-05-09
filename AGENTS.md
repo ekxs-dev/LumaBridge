@@ -91,7 +91,7 @@ npm run test:rust
 - [x] Probe `VideoFrame.copyTo()` on the first decoded frame and report I420P10 layout status.
 - [x] Add MKV demux support or a WASM-backed MKV adapter.
 - [x] Add WebCodecs-first decoder adapter with ffmpeg.wasm fallback probing.
-- [x] Add ffmpeg.wasm first-frame I420P10 diagnostic decode and SDR debug preview.
+- [x] Add automatic ffmpeg.wasm first-frame I420P10 diagnostic decode and SDR debug preview.
 - [x] Report non-HEVC Matroska tracks as unsupported inputs instead of container parse failures.
 - [ ] Turn ffmpeg.wasm fallback from first-frame diagnostic into a streaming/raw-frame adapter.
 - [ ] Validate real `VideoFrame.format === "I420P10"` and `VideoFrame.colorSpace`.
