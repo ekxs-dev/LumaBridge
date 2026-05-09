@@ -14,6 +14,9 @@
     "ci": "npm run test && npm run build && npm run test:e2e"
   },
   "dependencies": {
+    "@ffmpeg/core": "^0.12.10",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "pngjs": "^7.0.0"
   },
   "devDependencies": {

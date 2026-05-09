@@ -7,7 +7,9 @@ test('fixture files remain small enough for repository smoke tests', async () =>
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
   const files = [
     'tests/fixtures/dv_p5_short.mp4',
+    'tests/fixtures/dv_p5_short.mkv',
     'tests/fixtures/dv_p5_single_frame.mp4',
+    'tests/fixtures/dv_p5_single_frame.mkv',
     'tests/fixtures/hdr10_short.mp4',
     'tests/fixtures/bad_codec.mp4',
   ];

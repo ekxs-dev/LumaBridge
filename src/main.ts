@@ -1,9 +1,11 @@
 import './styles/app.css';
 import { createSyntheticBenchmark, summarizeBenchmark } from './core/benchmark';
 import { evaluateCapabilities, probeBrowserCapabilities } from './core/capabilities';
+import { probeDecoderAdapters, probeFfmpegWasmAdapter, type DecoderAdapterProbe } from './core/decoder-adapter';
 import { analyzeMp4HevcSamples, parseLengthPrefixedHevcSample } from './core/hevc';
-import { parseMp4, type Mp4VideoTrack } from './core/mp4';
-import { decodeFirstFrameFromMp4Track, type DecodedFrameProbe } from './core/webcodecs';
+import { parseMediaFile, type ParsedMediaSource } from './core/media-source';
+import type { Mp4VideoTrack } from './core/mp4';
+import type { DecodedFrameProbe } from './core/webcodecs';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -87,6 +89,10 @@ function renderBench() {
       height: number | null;
     },
     mp4: null as null | {
+      container: string;
+      loadedBytes: number;
+      isPartial: boolean;
+      warning: string | null;
       brands: string[];
       track: {
         id: number;
@@ -107,6 +113,7 @@ function renderBench() {
       };
     },
     webCodecs: null as DecodedFrameProbe | null,
+    decoderAdapter: null as DecoderAdapterProbe | null,
     parseError: null as string | null,
     summary,
   };
@@ -146,12 +153,15 @@ function renderBench() {
           </dl>
           <h2 class="subhead">WebCodecs probe</h2>
           <dl class="debug-list compact" id="decode-meta">
+            <dt>adapter</dt><dd>not selected</dd>
             <dt>support</dt><dd>not run</dd>
             <dt>frame</dt><dd>unknown</dd>
             <dt>format</dt><dd>unknown</dd>
             <dt>color</dt><dd>unknown</dd>
             <dt>copyTo</dt><dd>unknown</dd>
+            <dt>fallback</dt><dd>not needed</dd>
           </dl>
+          <button id="ffmpeg-raw-probe" class="secondary-button" type="button" disabled>Probe ffmpeg.wasm raw frame</button>
         </div>
         <div class="video-frame">
           <video id="bench-video" controls muted playsinline preload="metadata"></video>
@@ -187,6 +197,8 @@ function renderBench() {
   const trackMeta = document.querySelector<HTMLElement>('#track-meta');
   const decodeMeta = document.querySelector<HTMLElement>('#decode-meta');
   const reportJson = document.querySelector<HTMLElement>('#report-json');
+  const ffmpegRawProbe = document.querySelector<HTMLButtonElement>('#ffmpeg-raw-probe');
+  let activeTrack: Mp4VideoTrack | null = null;
 
   const updateReport = () => {
     if (reportJson) reportJson.textContent = JSON.stringify(report, null, 2);
@@ -197,6 +209,7 @@ function renderBench() {
     brands: string[] = [],
     error: string | null = null,
     rpuSummary: { firstSampleRpuNalUnits: number; totalRpuNalUnits: number } | null = null,
+    source: Pick<ParsedMediaSource, 'container' | 'loadedBytes' | 'isPartial' | 'warning'> | null = null,
   ) => {
     if (!trackMeta) return;
     if (error) {
@@ -217,36 +230,44 @@ function renderBench() {
       `;
       return;
     }
+    const loaded = source ? `${(source.loadedBytes / 1024 / 1024).toFixed(1)} MB${source.isPartial ? ' prefix' : ''}` : 'full file';
+    const containerLabel = source?.container ?? (brands.join(', ') || 'mp4');
     trackMeta.innerHTML = `
-      <dt>container</dt><dd>${brands.join(', ') || 'mp4'}</dd>
+      <dt>container</dt><dd>${containerLabel} (${loaded})</dd>
       <dt>codec</dt><dd>${track.hevcConfig?.codecString ?? track.codecType}</dd>
       <dt>samples</dt><dd>${track.sampleCount} (${track.samples.filter((sample) => sample.isSync).length} sync)</dd>
       <dt>RPU NAL</dt><dd>${rpuSummary ? `${rpuSummary.totalRpuNalUnits} total, ${rpuSummary.firstSampleRpuNalUnits} in first sample` : 'not scanned'}</dd>
+      ${source?.warning ? `<dt>note</dt><dd>${source.warning}</dd>` : ''}
     `;
   };
 
-  const updateDecodeMeta = (probe: DecodedFrameProbe | null, pending = false) => {
+  const updateDecodeMeta = (adapter: DecoderAdapterProbe | null, pending = false) => {
     if (!decodeMeta) return;
     if (pending) {
       decodeMeta.innerHTML = `
+        <dt>adapter</dt><dd>probing WebCodecs first</dd>
         <dt>support</dt><dd>probing</dd>
         <dt>frame</dt><dd>waiting for decoder</dd>
         <dt>format</dt><dd>unknown</dd>
         <dt>color</dt><dd>unknown</dd>
         <dt>copyTo</dt><dd>waiting</dd>
+        <dt>fallback</dt><dd>ffmpeg.wasm will be checked if needed</dd>
       `;
       return;
     }
-    if (!probe) {
+    if (!adapter?.webCodecs) {
       decodeMeta.innerHTML = `
+        <dt>adapter</dt><dd>not selected</dd>
         <dt>support</dt><dd>not run</dd>
         <dt>frame</dt><dd>unknown</dd>
         <dt>format</dt><dd>unknown</dd>
         <dt>color</dt><dd>unknown</dd>
         <dt>copyTo</dt><dd>unknown</dd>
+        <dt>fallback</dt><dd>not needed</dd>
       `;
       return;
     }
+    const probe = adapter.webCodecs;
     const color = probe.colorSpace
       ? `${probe.colorSpace.primaries ?? 'unknown'} / ${probe.colorSpace.transfer ?? 'unknown'} / ${probe.colorSpace.matrix ?? 'unknown'}`
       : 'unknown';
@@ -255,12 +276,19 @@ function renderBench() {
         ? `${probe.copyTo.allocationSize} bytes, ${probe.copyTo.layout.length} planes, ${probe.copyTo.elapsedMs.toFixed(1)} ms`
         : probe.copyTo.error
       : 'not attempted';
+    const fallback = adapter.fallbackReason
+      ? adapter.ffmpegWasm
+        ? `${adapter.fallbackReason}; ffmpeg.wasm ${adapter.ffmpegWasm.available ? `available in ${adapter.ffmpegWasm.elapsedMs.toFixed(1)} ms${adapter.ffmpegWasm.rawFrame.attempted ? `; raw ${adapter.ffmpegWasm.rawFrame.ok ? 'ok' : `failed: ${adapter.ffmpegWasm.rawFrame.error}`}` : ''}` : `failed: ${adapter.ffmpegWasm.error ?? 'unknown error'}`}`
+        : adapter.fallbackReason
+      : 'not needed';
     decodeMeta.innerHTML = `
+      <dt>adapter</dt><dd>${adapter.selected ?? 'none'} (${adapter.status})</dd>
       <dt>support</dt><dd>${probe.supported ? 'supported' : 'not supported'}${probe.error ? `: ${probe.error}` : ''}</dd>
       <dt>frame</dt><dd>${probe.decodedFrames} decoded in ${probe.elapsedMs.toFixed(1)} ms</dd>
       <dt>format</dt><dd>${probe.format ?? 'unknown'} ${probe.codedWidth && probe.codedHeight ? `${probe.codedWidth} x ${probe.codedHeight}` : ''}</dd>
       <dt>color</dt><dd>${color}</dd>
       <dt>copyTo</dt><dd>${copyTo}</dd>
+      <dt>fallback</dt><dd>${fallback}</dd>
     `;
   };
 
@@ -282,7 +310,10 @@ function renderBench() {
     };
     report.mp4 = null;
     report.webCodecs = null;
+    report.decoderAdapter = null;
+    activeTrack = null;
     report.parseError = null;
+    if (ffmpegRawProbe) ffmpegRawProbe.disabled = true;
     updateDecodeMeta(null);
 
     if (videoMeta) {
@@ -295,17 +326,21 @@ function renderBench() {
     }
 
     try {
-      const fileBytes = new Uint8Array(await file.arrayBuffer());
-      const parsed = parseMp4(fileBytes);
+      const parsed = await parseMediaFile(file);
       const track = parsed.tracks[0] ?? null;
       const lengthSize = track?.hevcConfig?.lengthSize ?? 0;
       const firstSample = track?.samples[0] ?? null;
       const firstSampleAnalysis = track && firstSample && lengthSize
-        ? parseLengthPrefixedHevcSample(fileBytes.subarray(firstSample.offset, firstSample.offset + firstSample.size), lengthSize)
+        ? parseLengthPrefixedHevcSample(parsed.bytes.subarray(firstSample.offset, firstSample.offset + firstSample.size), lengthSize)
         : null;
-      const fullAnalysis = track && lengthSize ? analyzeMp4HevcSamples(fileBytes, track.samples, lengthSize) : null;
+      const fullAnalysis = track && lengthSize ? analyzeMp4HevcSamples(parsed.bytes, track.samples, lengthSize) : null;
       if (track) {
+        activeTrack = track;
         report.mp4 = {
+          container: parsed.container,
+          loadedBytes: parsed.loadedBytes,
+          isPartial: parsed.isPartial,
+          warning: parsed.warning,
           brands: parsed.brands,
           track: {
             id: track.id,
@@ -329,11 +364,13 @@ function renderBench() {
       updateTrackMeta(track, parsed.brands, null, fullAnalysis && firstSampleAnalysis ? {
         firstSampleRpuNalUnits: firstSampleAnalysis.rpuNalUnits.length,
         totalRpuNalUnits: fullAnalysis.rpuNalUnits.length,
-      } : null);
+      } : null, parsed);
       if (track?.hevcConfig) {
         updateDecodeMeta(null, true);
-        report.webCodecs = await decodeFirstFrameFromMp4Track(fileBytes, track);
-        updateDecodeMeta(report.webCodecs);
+        report.decoderAdapter = await probeDecoderAdapters(parsed.bytes, track, file);
+        report.webCodecs = report.decoderAdapter.webCodecs;
+        if (ffmpegRawProbe) ffmpegRawProbe.disabled = false;
+        updateDecodeMeta(report.decoderAdapter);
       }
     } catch (error) {
       report.parseError = error instanceof Error ? error.message : String(error);
@@ -341,6 +378,31 @@ function renderBench() {
       updateDecodeMeta(null);
     }
     updateReport();
+  });
+
+  ffmpegRawProbe?.addEventListener('click', async () => {
+    const file = fileInput?.files?.[0];
+    const track = activeTrack;
+    if (!file || !track) return;
+    ffmpegRawProbe.disabled = true;
+    ffmpegRawProbe.textContent = 'Probing ffmpeg.wasm raw frame...';
+    if (!report.decoderAdapter) {
+      report.decoderAdapter = {
+        selected: 'ffmpeg.wasm',
+        status: 'fallback-needed',
+        webCodecs: report.webCodecs,
+        ffmpegWasm: null,
+        fallbackReason: 'Manual ffmpeg.wasm raw-frame probe requested.',
+      };
+    }
+    report.decoderAdapter.ffmpegWasm = await probeFfmpegWasmAdapter(file, track, { decodeFirstFrame: true });
+    report.decoderAdapter.selected = report.decoderAdapter.ffmpegWasm.available ? 'ffmpeg.wasm' : report.decoderAdapter.selected;
+    report.decoderAdapter.status = report.decoderAdapter.ffmpegWasm.rawFrame.ok ? 'fallback-available' : 'failed';
+    report.decoderAdapter.fallbackReason ??= 'Manual ffmpeg.wasm raw-frame probe requested.';
+    updateDecodeMeta(report.decoderAdapter);
+    updateReport();
+    ffmpegRawProbe.textContent = 'Probe ffmpeg.wasm raw frame';
+    ffmpegRawProbe.disabled = false;
   });
 
   video?.addEventListener('loadedmetadata', () => {

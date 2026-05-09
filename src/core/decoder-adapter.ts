@@ -1,0 +1,285 @@
+import { FFFSType } from '@ffmpeg/ffmpeg';
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import coreUrl from '@ffmpeg/core?url';
+import wasmUrl from '@ffmpeg/core/wasm?url';
+import type { Mp4VideoTrack } from './mp4';
+import { decodeFirstFrameFromMp4Track, type DecodedFrameProbe } from './webcodecs';
+
+export type DecoderAdapterName = 'webcodecs' | 'ffmpeg.wasm';
+export type DecoderAdapterStatus = 'not-run' | 'success' | 'fallback-needed' | 'fallback-available' | 'failed';
+
+export interface FfmpegRawFrameProbe {
+  attempted: boolean;
+  ok: boolean;
+  elapsedMs: number;
+  inputMode: 'workerfs' | 'memfs' | null;
+  format: 'I420P10' | null;
+  bytes: number | null;
+  expectedBytes: number | null;
+  error: string | null;
+}
+
+export interface FfmpegWasmProbe {
+  available: boolean;
+  elapsedMs: number;
+  loaded: boolean;
+  mounted: boolean;
+  version: string | null;
+  rawFrame: FfmpegRawFrameProbe;
+  error: string | null;
+  logs: string[];
+}
+
+export interface DecoderAdapterProbe {
+  selected: DecoderAdapterName | null;
+  status: DecoderAdapterStatus;
+  webCodecs: DecodedFrameProbe | null;
+  ffmpegWasm: FfmpegWasmProbe | null;
+  fallbackReason: string | null;
+}
+
+let ffmpegInstance: FFmpeg | null = null;
+let ffmpegLoadPromise: Promise<FFmpeg> | null = null;
+let ffmpegLogs: string[] = [];
+const MEMFS_COPY_LIMIT_BYTES = 128 * 1024 * 1024;
+
+function shouldFallbackFromWebCodecs(probe: DecodedFrameProbe): string | null {
+  if (!probe.supported) return probe.error ?? 'WebCodecs did not support the HEVC decoder config.';
+  if (probe.error) return probe.error;
+  if (probe.decodedFrames < 1) return 'WebCodecs decoded no frames.';
+  if (probe.format !== 'I420P10') return `WebCodecs returned ${probe.format ?? 'unknown'} instead of I420P10.`;
+  if (!probe.copyTo?.ok) return probe.copyTo?.error ?? 'VideoFrame.copyTo() did not produce an I420P10 layout.';
+  return null;
+}
+
+async function loadFfmpegWasm(): Promise<FFmpeg> {
+  if (ffmpegInstance?.loaded) return ffmpegInstance;
+  if (ffmpegLoadPromise) return ffmpegLoadPromise;
+
+  ffmpegLogs = [];
+  const ffmpeg = new FFmpeg();
+  ffmpeg.on('log', ({ message }) => {
+    ffmpegLogs.push(message);
+    if (ffmpegLogs.length > 10) ffmpegLogs.shift();
+  });
+  ffmpegLoadPromise = (async () => {
+    await ffmpeg.load({
+      coreURL: await toBlobURL(coreUrl, 'text/javascript'),
+      wasmURL: await toBlobURL(wasmUrl, 'application/wasm'),
+    });
+    ffmpegInstance = ffmpeg;
+    return ffmpeg;
+  })();
+
+  try {
+    return await ffmpegLoadPromise;
+  } catch (error) {
+    ffmpegLoadPromise = null;
+    throw error;
+  }
+}
+
+function rawFrameNotAttempted(): FfmpegRawFrameProbe {
+  return {
+    attempted: false,
+    ok: false,
+    elapsedMs: 0,
+    inputMode: null,
+    format: null,
+    bytes: null,
+    expectedBytes: null,
+    error: null,
+  };
+}
+
+function expectedI420P10Bytes(track: Mp4VideoTrack): number {
+  const y = track.width * track.height * 2;
+  const chroma = Math.ceil(track.width / 2) * Math.ceil(track.height / 2) * 2;
+  return y + chroma * 2;
+}
+
+function safeFileName(name: string): string {
+  return name.replace(/[\\/]/g, '_') || 'input.mkv';
+}
+
+async function decodeFirstRawFrameWithFfmpeg(ffmpeg: FFmpeg, file: File, track: Mp4VideoTrack, timeoutMs: number): Promise<FfmpegRawFrameProbe> {
+  const startedAt = performance.now();
+  const expectedBytes = expectedI420P10Bytes(track);
+  const outputPath = '/frame.yuv';
+  const mountPoint = '/input';
+  const fileName = safeFileName(file.name);
+  let inputPath = `${mountPoint}/${fileName}`;
+  let inputMode: FfmpegRawFrameProbe['inputMode'] = 'workerfs';
+  let mounted = false;
+  let copied = false;
+
+  try {
+    try {
+      await ffmpeg.createDir(mountPoint);
+    } catch {
+      // The directory may already exist from a previous probe.
+    }
+
+    try {
+      await ffmpeg.mount(FFFSType.WORKERFS, { files: [file] }, mountPoint);
+      mounted = true;
+    } catch (mountError) {
+      if (file.size > MEMFS_COPY_LIMIT_BYTES) throw mountError;
+      inputMode = 'memfs';
+      inputPath = `/input-${fileName}`;
+      await ffmpeg.writeFile(inputPath, await fetchFile(file));
+      copied = true;
+    }
+
+    const exitCode = await ffmpeg.exec([
+      '-v',
+      'error',
+      '-i',
+      inputPath,
+      '-map',
+      '0:v:0',
+      '-frames:v',
+      '1',
+      '-an',
+      '-sn',
+      '-f',
+      'rawvideo',
+      '-pix_fmt',
+      'yuv420p10le',
+      outputPath,
+    ], timeoutMs);
+
+    if (exitCode !== 0) {
+      return {
+        attempted: true,
+        ok: false,
+        elapsedMs: performance.now() - startedAt,
+        inputMode,
+        format: null,
+        bytes: null,
+        expectedBytes,
+        error: `ffmpeg exited with code ${exitCode}.`,
+      };
+    }
+
+    const raw = await ffmpeg.readFile(outputPath);
+    const bytes = typeof raw === 'string' ? new TextEncoder().encode(raw).byteLength : raw.byteLength;
+    return {
+      attempted: true,
+      ok: bytes === expectedBytes,
+      elapsedMs: performance.now() - startedAt,
+      inputMode,
+      format: 'I420P10',
+      bytes,
+      expectedBytes,
+      error: bytes === expectedBytes ? null : `Expected ${expectedBytes} raw bytes, got ${bytes}.`,
+    };
+  } catch (error) {
+    return {
+      attempted: true,
+      ok: false,
+      elapsedMs: performance.now() - startedAt,
+      inputMode,
+      format: null,
+      bytes: null,
+      expectedBytes,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    try {
+      await ffmpeg.deleteFile(outputPath);
+    } catch {
+      // Output may not exist when decode fails.
+    }
+    if (copied) {
+      try {
+        await ffmpeg.deleteFile(inputPath);
+      } catch {
+        // Ignore cleanup errors from the wasm FS.
+      }
+    }
+    if (mounted) {
+      try {
+        await ffmpeg.unmount(mountPoint);
+      } catch {
+        // Ignore cleanup errors from WorkerFS.
+      }
+    }
+  }
+}
+
+export async function probeFfmpegWasmAdapter(
+  file?: File,
+  track?: Mp4VideoTrack,
+  options: { decodeFirstFrame?: boolean; timeoutMs?: number } = {},
+): Promise<FfmpegWasmProbe> {
+  const startedAt = performance.now();
+  try {
+    const ffmpeg = await loadFfmpegWasm();
+    let mounted = false;
+    if (file && !options.decodeFirstFrame) {
+      const mountPoint = '/input';
+      try {
+        await ffmpeg.createDir(mountPoint);
+      } catch {
+        // The directory may already exist from a previous probe.
+      }
+      await ffmpeg.mount(FFFSType.WORKERFS, { files: [file] }, mountPoint);
+      mounted = true;
+      await ffmpeg.unmount(mountPoint);
+    }
+    const rawFrame = options.decodeFirstFrame && file && track
+      ? await decodeFirstRawFrameWithFfmpeg(ffmpeg, file, track, options.timeoutMs ?? 60_000)
+      : rawFrameNotAttempted();
+
+    return {
+      available: true,
+      elapsedMs: performance.now() - startedAt,
+      loaded: ffmpeg.loaded,
+      mounted,
+      version: '0.12',
+      rawFrame,
+      error: null,
+      logs: [...ffmpegLogs],
+    };
+  } catch (error) {
+    return {
+      available: false,
+      elapsedMs: performance.now() - startedAt,
+      loaded: false,
+      mounted: false,
+      version: null,
+      rawFrame: rawFrameNotAttempted(),
+      error: error instanceof Error ? error.message : String(error),
+      logs: [...ffmpegLogs],
+    };
+  }
+}
+
+export async function probeDecoderAdapters(
+  fileBytes: Uint8Array,
+  track: Mp4VideoTrack,
+  file?: File,
+): Promise<DecoderAdapterProbe> {
+  const webCodecs = await decodeFirstFrameFromMp4Track(fileBytes, track);
+  const fallbackReason = shouldFallbackFromWebCodecs(webCodecs);
+  if (!fallbackReason) {
+    return {
+      selected: 'webcodecs',
+      status: 'success',
+      webCodecs,
+      ffmpegWasm: null,
+      fallbackReason: null,
+    };
+  }
+
+  const ffmpegWasm = await probeFfmpegWasmAdapter(file, track);
+  return {
+    selected: ffmpegWasm.available ? 'ffmpeg.wasm' : null,
+    status: ffmpegWasm.available ? 'fallback-available' : 'failed',
+    webCodecs,
+    ffmpegWasm,
+    fallbackReason,
+  };
+}

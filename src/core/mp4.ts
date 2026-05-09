@@ -1,4 +1,4 @@
-import { buildHevcCodecString } from './codec';
+import { parseHevcDecoderConfigRecord } from './hevc-config';
 
 export interface Mp4BoxInfo {
   type: string;
@@ -162,39 +162,7 @@ function parseHdlr(reader: Reader, box: Mp4BoxInfo): string {
 }
 
 function parseHvcC(reader: Reader, box: Mp4BoxInfo, brand: 'hvc1' | 'hev1'): HevcConfigSummary {
-  const start = box.start + box.headerSize;
-  const profileByte = reader.u8(start + 1);
-  const profileSpace = profileByte >> 6;
-  const tierFlag = Boolean(profileByte & 0x20);
-  const profileIdc = profileByte & 0x1f;
-  const profileCompatibilityFlags = reader.u32(start + 2);
-  let constraintIndicatorFlags = 0;
-  for (let i = 0; i < 6; i += 1) {
-    constraintIndicatorFlags = constraintIndicatorFlags * 256 + reader.u8(start + 6 + i);
-  }
-  const levelIdc = reader.u8(start + 12);
-  const lengthSize = (reader.u8(start + 21) & 0x03) + 1;
-  const codecString = buildHevcCodecString({
-    brand,
-    profileSpace,
-    profileIdc,
-    profileCompatibilityFlags,
-    tierFlag,
-    levelIdc,
-    constraintIndicatorFlags,
-  });
-  return {
-    configurationVersion: reader.u8(start),
-    profileSpace,
-    tierFlag,
-    profileIdc,
-    profileCompatibilityFlags,
-    constraintIndicatorFlags,
-    levelIdc,
-    lengthSize,
-    codecString,
-    description: reader.data.slice(start, box.end),
-  };
+  return parseHevcDecoderConfigRecord(reader.data.slice(box.start + box.headerSize, box.end), brand);
 }
 
 function parseStsd(reader: Reader, box: Mp4BoxInfo): Pick<Mp4VideoTrack, 'codecType' | 'hevcConfig' | 'hasDolbyVisionConfig'> {

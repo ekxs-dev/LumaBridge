@@ -89,7 +89,9 @@ npm run test:rust
 - [x] Implement real MP4 demux metadata for HEVC samples and codec string extraction.
 - [x] Feed MP4 samples into WebCodecs `VideoDecoder` for first-frame probing.
 - [x] Probe `VideoFrame.copyTo()` on the first decoded frame and report I420P10 layout status.
-- [ ] Add MKV demux support or a WASM-backed MKV adapter.
+- [x] Add MKV demux support or a WASM-backed MKV adapter.
+- [x] Add WebCodecs-first decoder adapter with ffmpeg.wasm fallback probing.
+- [ ] Turn ffmpeg.wasm fallback from first-frame diagnostic into a streaming/raw-frame adapter.
 - [ ] Validate real `VideoFrame.format === "I420P10"` and `VideoFrame.colorSpace`.
 - [ ] Copy real `VideoFrame` planes with `copyTo()` and upload Y/U/V data to WebGPU.
 - [ ] Replace Rust placeholder RPU parsing with full libdovi/dovi_tool-compatible metadata extraction.

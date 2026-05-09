@@ -27,6 +27,7 @@ test('benchmark page emits a JSON timing report', async ({ page }) => {
   await expect(page.getByText('WebCodecs probe')).toBeVisible();
   await expect(page.locator('#video-file')).toBeAttached();
   await expect(page.locator('#bench-video')).toBeVisible();
+  await expect(page.locator('#ffmpeg-raw-probe')).toBeDisabled();
   await expect(page.getByRole('rowheader', { name: 'copyTo' })).toBeVisible();
   await expect(page.getByRole('rowheader', { name: 'shaderRender' })).toBeVisible();
   const report = await page.locator('#report-json').textContent();
@@ -44,13 +45,35 @@ test('benchmark page parses a selected MP4 fixture', async ({ page }) => {
   await expect(page.locator('#track-meta')).toContainText('154 (2 sync)');
   await expect(page.locator('#track-meta')).toContainText('154 total');
   await expect(page.locator('#decode-meta')).not.toContainText('not run');
+  await expect(page.locator('#ffmpeg-raw-probe')).toBeEnabled();
 
   const report = await page.locator('#report-json').textContent();
   const parsed = JSON.parse(report ?? '{}');
   expect(parsed.selectedVideo.name).toBe('dv_p5_short.mp4');
+  expect(parsed.mp4.container).toBe('mp4');
   expect(parsed.mp4.track.sampleCount).toBe(154);
   expect(parsed.mp4.track.codecType).toBe('hev1');
   expect(parsed.mp4.track.totalRpuNalUnits).toBe(154);
   expect(parsed.webCodecs).not.toBeNull();
   expect(parsed.webCodecs).toHaveProperty('copyTo');
+});
+
+test('benchmark page parses a selected MKV fixture without MP4 moov failure', async ({ page }) => {
+  await page.goto('/bench');
+  await page.locator('#video-file').setInputFiles(path.resolve('tests/fixtures/dv_p5_short.mkv'));
+  await expect(page.locator('#selected-name')).toHaveText('dv_p5_short.mkv');
+  await expect(page.locator('#track-meta')).toContainText('matroska');
+  await expect(page.locator('#track-meta')).toContainText(/hev1\.2\./);
+  await expect(page.locator('#track-meta')).toContainText('154 total');
+  await expect(page.locator('#track-meta')).not.toContainText('MP4 moov box not found');
+  await expect(page.locator('#decode-meta')).not.toContainText('not run');
+  await expect(page.locator('#ffmpeg-raw-probe')).toBeEnabled();
+
+  const report = await page.locator('#report-json').textContent();
+  const parsed = JSON.parse(report ?? '{}');
+  expect(parsed.selectedVideo.name).toBe('dv_p5_short.mkv');
+  expect(parsed.mp4.container).toBe('matroska');
+  expect(parsed.mp4.track.codecType).toBe('hev1');
+  expect(parsed.mp4.track.totalRpuNalUnits).toBe(154);
+  expect(parsed.parseError).toBeNull();
 });
