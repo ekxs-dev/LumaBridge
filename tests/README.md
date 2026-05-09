@@ -7,7 +7,7 @@ The fixtures in this directory are intentionally small and versioned.
 - `hdr10_short.mp4`: synthetic HEVC Main10 HDR10-like sample with no Dolby Vision RPU.
 - `no_rpu_hevc.mp4`: alias of the HDR10 fixture for explicit no-RPU tests.
 - `bad_codec.mp4`: H.264 sample used to verify unsupported-codec handling.
-- `references/rpu_reference.json`: golden RPU NAL count and extraction facts.
+- `references/rpu_reference.json`: golden RPU NAL count, extraction facts, and compact metadata ABI size.
 - `references/sdr_reference.png`: libplacebo SDR BT.709 100 nit reference frame.
 
 Regenerate fixtures with:

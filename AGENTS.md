@@ -80,8 +80,8 @@ npm run test:rust
 - Compact DV metadata ABI is 276 `f32` values with WGSL `vec4` row padding. Keep `src/core/metadata.ts`, `crates/lumabridge_wasm/src/lib.rs`, and `src/gpu/dv-p5-to-sdr.wgsl` aligned.
 - `src/core/gpu-upload.ts` prepares tightly packed `u32` Y/U/V storage-buffer data plus source/output frame params from I420P10 frames. `/bench` attempts a live WebGPU buffer upload after ffmpeg.wasm raw-frame decode when WebGPU is available.
 - `src/core/webgpu-render.ts` runs the WGSL compute shader against the ffmpeg.wasm raw frame and reads back an RGBA8 SDR debug preview when WebGPU is available. This is still a debug render path until real RPU metadata is parsed and applied.
-- Rust `parse_rpu_metadata` is currently a placeholder returning identity metadata for valid payloads. Full libdovi/dovi_tool-compatible parsing is still pending.
-- WGSL currently contains a skeleton/reference compute path, not libplacebo-accurate DV reshaping.
+- Rust `parse_rpu_metadata` now uses the MIT `dolby_vision` crate to parse real HEVC type-62 RPU payloads and fill compact metadata with Dolby matrices, offsets, source PQ, pivots, and polynomial/MMR coefficient slots. It is still pending final libplacebo parity for pivot interpretation, per-piece method/order packing, and shader application.
+- WGSL currently contains a debug compute path and simplified preview modes, not libplacebo-accurate DV reshaping.
 
 ## PR / Commit Guidance
 - Suggested title format: `[lumabridge] <Title>`.
@@ -107,7 +107,8 @@ npm run test:rust
 - [ ] Turn ffmpeg.wasm fallback from first-frame diagnostic into a streaming/raw-frame adapter.
 - [ ] Validate real `VideoFrame.format === "I420P10"` and `VideoFrame.colorSpace`.
 - [ ] Copy real `VideoFrame` planes with `copyTo()` and upload Y/U/V data to WebGPU.
-- [ ] Replace Rust placeholder RPU parsing with full libdovi/dovi_tool-compatible metadata extraction.
+- [x] Replace Rust placeholder RPU parsing with real `dolby_vision` crate-backed metadata extraction.
+- [ ] Validate RPU pivot/method/MMR packing against FFmpeg/libplacebo for all compact metadata slots.
 - [x] Define and freeze the compact metadata buffer ABI between Rust, TypeScript, and WGSL.
 - [x] Add deterministic I420P10 plane upload planning for WebGPU storage buffers.
 - [x] Wire ffmpeg.wasm raw-frame output to a live WebGPU buffer upload probe on `/bench`.

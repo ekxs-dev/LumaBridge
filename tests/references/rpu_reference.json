@@ -68,6 +68,6 @@
     }
   ],
   "metadataSchemaVersion": 1,
-  "compactMetadataFloat32Count": 256,
+  "compactMetadataFloat32Count": 276,
   "note": "This golden verifies RPU extraction/counting. Full libdovi field decoding plugs into the same schema later."
 }

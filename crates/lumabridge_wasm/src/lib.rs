@@ -1,3 +1,5 @@
+use dolby_vision::rpu::dovi_rpu::DoviRpu;
+use dolby_vision::rpu::rpu_data_mapping::DoviMappingMethod;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -150,7 +152,127 @@ pub fn parse_rpu_metadata(rpu_payload: &[u8]) -> Result<CompactDoviMetadata, Lum
         return Err(LumaWasmError::InvalidRpu);
     }
 
-    Ok(CompactDoviMetadata::default())
+    let rpu = DoviRpu::parse_unspec62_nalu(rpu_payload).map_err(|_| LumaWasmError::InvalidRpu)?;
+    compact_metadata_from_dovi_rpu(&rpu).ok_or(LumaWasmError::InvalidRpu)
+}
+
+fn compact_metadata_from_dovi_rpu(rpu: &DoviRpu) -> Option<CompactDoviMetadata> {
+    let header = &rpu.header;
+    let mapping = rpu.rpu_data_mapping.as_ref()?;
+    let color = rpu.vdr_dm_data.as_ref()?;
+    let coefficient_scale = 1.0 / ((1u64 << header.coefficient_log2_denom) as f32);
+    let pivot_scale = 1.0 / (((1u64 << (header.bl_bit_depth_minus8 + 8)) - 1) as f32);
+
+    let mut metadata = CompactDoviMetadata {
+        nonlinear_offset: [
+            color.ycc_to_rgb_offset0 as f32 / 268_435_456.0,
+            color.ycc_to_rgb_offset1 as f32 / 268_435_456.0,
+            color.ycc_to_rgb_offset2 as f32 / 268_435_456.0,
+        ],
+        nonlinear_matrix: [
+            color.ycc_to_rgb_coef0 as f32 / 8192.0,
+            color.ycc_to_rgb_coef1 as f32 / 8192.0,
+            color.ycc_to_rgb_coef2 as f32 / 8192.0,
+            color.ycc_to_rgb_coef3 as f32 / 8192.0,
+            color.ycc_to_rgb_coef4 as f32 / 8192.0,
+            color.ycc_to_rgb_coef5 as f32 / 8192.0,
+            color.ycc_to_rgb_coef6 as f32 / 8192.0,
+            color.ycc_to_rgb_coef7 as f32 / 8192.0,
+            color.ycc_to_rgb_coef8 as f32 / 8192.0,
+        ],
+        linear_matrix: [
+            color.rgb_to_lms_coef0 as f32 / 16384.0,
+            color.rgb_to_lms_coef1 as f32 / 16384.0,
+            color.rgb_to_lms_coef2 as f32 / 16384.0,
+            color.rgb_to_lms_coef3 as f32 / 16384.0,
+            color.rgb_to_lms_coef4 as f32 / 16384.0,
+            color.rgb_to_lms_coef5 as f32 / 16384.0,
+            color.rgb_to_lms_coef6 as f32 / 16384.0,
+            color.rgb_to_lms_coef7 as f32 / 16384.0,
+            color.rgb_to_lms_coef8 as f32 / 16384.0,
+        ],
+        source_min_pq: color.source_min_pq as f32 / 4095.0,
+        source_max_pq: color.source_max_pq as f32 / 4095.0,
+        ..CompactDoviMetadata::default()
+    };
+
+    metadata.pivots.fill(0.0);
+    metadata.poly_coeffs.fill(0.0);
+    metadata.mmr_coeffs.fill(0.0);
+
+    for (component_index, curve) in mapping.curves.iter().enumerate() {
+        if component_index >= 3 {
+            break;
+        }
+
+        let pivot_base = component_index * 9;
+        for (pivot_index, pivot) in curve.pivots.iter().take(9).enumerate() {
+            metadata.pivots[pivot_base + pivot_index] = *pivot as f32 * pivot_scale;
+        }
+
+        let piece_count = curve.pivots.len().saturating_sub(1).min(8);
+        for piece_index in 0..piece_count {
+            match curve.mapping_idc {
+                DoviMappingMethod::Polynomial => {
+                    let Some(poly) = curve.polynomial.as_ref() else {
+                        continue;
+                    };
+                    let coeff_base = (component_index * 8 + piece_index) * 3;
+                    for coeff_index in 0..3 {
+                        let int_part = poly
+                            .poly_coef_int
+                            .get(piece_index)
+                            .and_then(|coeffs| coeffs.get(coeff_index))
+                            .copied()
+                            .unwrap_or(0);
+                        let frac_part = poly
+                            .poly_coef
+                            .get(piece_index)
+                            .and_then(|coeffs| coeffs.get(coeff_index))
+                            .copied()
+                            .unwrap_or(0) as i64;
+                        metadata.poly_coeffs[coeff_base + coeff_index] =
+                            ((int_part << header.coefficient_log2_denom) + frac_part) as f32 * coefficient_scale;
+                    }
+                }
+                DoviMappingMethod::MMR => {
+                    let Some(mmr) = curve.mmr.as_ref() else {
+                        continue;
+                    };
+                    let coeff_base = (component_index * 8 + piece_index) * 6;
+                    let constant_int = mmr
+                        .mmr_constant_int
+                        .get(piece_index)
+                        .copied()
+                        .unwrap_or(0);
+                    let constant_frac = mmr.mmr_constant.get(piece_index).copied().unwrap_or(0) as i64;
+                    metadata.mmr_coeffs[coeff_base] =
+                        ((constant_int << header.coefficient_log2_denom) + constant_frac) as f32 * coefficient_scale;
+                    for coeff_index in 0..5 {
+                        let int_part = mmr
+                            .mmr_coef_int
+                            .get(piece_index)
+                            .and_then(|orders| orders.first())
+                            .and_then(|coeffs| coeffs.get(coeff_index))
+                            .copied()
+                            .unwrap_or(0);
+                        let frac_part = mmr
+                            .mmr_coef
+                            .get(piece_index)
+                            .and_then(|orders| orders.first())
+                            .and_then(|coeffs| coeffs.get(coeff_index))
+                            .copied()
+                            .unwrap_or(0) as i64;
+                        metadata.mmr_coeffs[coeff_base + 1 + coeff_index] =
+                            ((int_part << header.coefficient_log2_denom) + frac_part) as f32 * coefficient_scale;
+                    }
+                }
+                DoviMappingMethod::Invalid => {}
+            }
+        }
+    }
+
+    Some(metadata)
 }
 
 pub fn pack_metadata(metadata: &CompactDoviMetadata) -> [f32; COMPACT_DOVI_FLOAT32_COUNT] {
@@ -236,5 +358,54 @@ mod tests {
     #[test]
     fn malformed_rpu_returns_error() {
         assert_eq!(parse_rpu_metadata(&[]).unwrap_err(), LumaWasmError::InvalidRpu);
+    }
+
+    #[test]
+    fn parses_real_fixture_rpu_metadata() {
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dv_p5_short.mp4"
+        ))
+        .unwrap();
+        let first_rpu = find_first_fixture_rpu(&bytes).unwrap();
+        let metadata = parse_rpu_metadata(first_rpu).unwrap();
+
+        assert!((metadata.nonlinear_offset[1] - 0.5).abs() < 0.0001);
+        assert!((metadata.nonlinear_matrix[1] - 799.0 / 8192.0).abs() < 0.0001);
+        assert!((metadata.linear_matrix[0] - 17081.0 / 16384.0).abs() < 0.0001);
+        assert!((metadata.source_min_pq - 7.0 / 4095.0).abs() < 0.0001);
+        assert!((metadata.source_max_pq - 3079.0 / 4095.0).abs() < 0.0001);
+        assert!(metadata.pivots.iter().any(|value| *value > 0.0 && *value < 1.0));
+        assert!((metadata.poly_coeffs[0] - 9133.0 / 8_388_608.0).abs() < 0.0001);
+        assert!((metadata.poly_coeffs[1] - 17_647_044.0 / 8_388_608.0).abs() < 0.0001);
+        assert!(metadata.poly_coeffs.iter().any(|value| value.abs() > 0.0001));
+    }
+
+    fn find_first_fixture_rpu(bytes: &[u8]) -> Option<&[u8]> {
+        let mut cursor = 0;
+        while cursor + 8 <= bytes.len() {
+            let size = u32::from_be_bytes(bytes[cursor..cursor + 4].try_into().ok()?) as usize;
+            let box_type = &bytes[cursor + 4..cursor + 8];
+            if size < 8 || cursor + size > bytes.len() {
+                return None;
+            }
+            if box_type == b"mdat" {
+                let mut sample_cursor = cursor + 8;
+                let end = cursor + size;
+                while sample_cursor + 4 <= end {
+                    let nal_size = u32::from_be_bytes(bytes[sample_cursor..sample_cursor + 4].try_into().ok()?) as usize;
+                    let payload = sample_cursor + 4;
+                    if nal_size == 0 || payload + nal_size > end {
+                        return None;
+                    }
+                    if nal_type(bytes[payload]) == HEVC_NAL_DV_RPU {
+                        return Some(&bytes[payload..payload + nal_size]);
+                    }
+                    sample_cursor = payload + nal_size;
+                }
+            }
+            cursor += size;
+        }
+        None
     }
 }

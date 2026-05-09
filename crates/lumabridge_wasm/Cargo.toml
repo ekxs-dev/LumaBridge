@@ -8,6 +8,7 @@ license = "MIT"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+dolby_vision = "3.3.2"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 wasm-bindgen = { version = "0.2", optional = true }

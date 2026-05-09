@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { COMPACT_DOVI_FLOAT32_COUNT } from '../../src/core/metadata';
 import rpuReference from '../references/rpu_reference.json';
 
 const root = path.resolve(__dirname, '../..');
@@ -24,5 +25,6 @@ describe('versioned fixtures', () => {
     expect(rpuReference.dvProfile).toBe(5);
     expect(rpuReference.rpuCount).toBe(154);
     expect(rpuReference.nalUnitCounts['62']).toBe(154);
+    expect(rpuReference.compactMetadataFloat32Count).toBe(COMPACT_DOVI_FLOAT32_COUNT);
   });
 });
