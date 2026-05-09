@@ -1,0 +1,29 @@
+import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { parseMp4 } from '../../src/core/mp4';
+import { findSampleForSeconds, inspectRpuForSeconds } from '../../src/core/rpu-alignment';
+
+describe('RPU frame alignment', () => {
+  const bytes = new Uint8Array(readFileSync('tests/fixtures/dv_p5_short.mp4'));
+  const track = parseMp4(bytes).tracks[0];
+
+  it('maps a selected time to the display sample carrying the RPU NAL', () => {
+    const sample = findSampleForSeconds(track, 0.04);
+    expect(sample?.index).toBe(4);
+
+    const selection = inspectRpuForSeconds(bytes, track, 0.04);
+    expect(selection.status).toBe('present');
+    expect(selection.sampleIndex).toBe(4);
+    expect(selection.timestampUs).toBe(40_000);
+    expect(selection.durationUs).toBe(40_000);
+    expect(selection.rpuNalUnits).toBe(1);
+    expect(selection.firstRpuNalHex).toMatch(/^7c /);
+  });
+
+  it('reports when a requested time is beyond parsed samples', () => {
+    const selection = inspectRpuForSeconds(bytes, track, 999);
+    expect(selection.status).toBe('outside-parsed-samples');
+    expect(selection.sampleIndex).toBeNull();
+    expect(selection.rpuNalUnits).toBe(0);
+  });
+});

@@ -12,6 +12,7 @@ import {
   type RawPreviewMode,
   type SdrPreviewImage,
 } from './core/raw-frame';
+import { inspectRpuForSeconds, type RpuFrameSelection } from './core/rpu-alignment';
 import type { DecodedFrameProbe } from './core/webcodecs';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -121,6 +122,7 @@ function renderBench() {
     },
     webCodecs: null as DecodedFrameProbe | null,
     decoderAdapter: null as DecoderAdapterProbe | null,
+    frameRpu: null as RpuFrameSelection | null,
     sdrPreview: null as null | {
       width: number;
       height: number;
@@ -178,6 +180,13 @@ function renderBench() {
             <dt>fallback</dt><dd>not needed</dd>
           </dl>
           <button id="ffmpeg-raw-probe" class="secondary-button" type="button" disabled>Render selected SDR frame</button>
+          <h2 class="subhead">Frame/RPU alignment</h2>
+          <dl class="debug-list compact" id="frame-rpu-meta">
+            <dt>time</dt><dd>not selected</dd>
+            <dt>sample</dt><dd>unknown</dd>
+            <dt>RPU</dt><dd>unknown</dd>
+            <dt>first NAL</dt><dd>unknown</dd>
+          </dl>
         </div>
         <div class="video-frame">
           <video id="bench-video" controls muted playsinline preload="metadata"></video>
@@ -231,6 +240,7 @@ function renderBench() {
   const videoMeta = document.querySelector<HTMLElement>('#video-meta');
   const trackMeta = document.querySelector<HTMLElement>('#track-meta');
   const decodeMeta = document.querySelector<HTMLElement>('#decode-meta');
+  const frameRpuMeta = document.querySelector<HTMLElement>('#frame-rpu-meta');
   const reportJson = document.querySelector<HTMLElement>('#report-json');
   const ffmpegRawProbe = document.querySelector<HTMLButtonElement>('#ffmpeg-raw-probe');
   const sdrPreviewCanvas = document.querySelector<HTMLCanvasElement>('#sdr-preview');
@@ -239,6 +249,7 @@ function renderBench() {
   const previewSecondsInput = document.querySelector<HTMLInputElement>('#sdr-preview-seconds');
   const previewModeButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-preview-mode]')];
   let activeTrack: Mp4VideoTrack | null = null;
+  let activeParsedSource: ParsedMediaSource | null = null;
   let selectionVersion = 0;
   let isRenderingRawPreview = false;
   let previewMode: RawPreviewMode = 'raw-luma';
@@ -250,6 +261,40 @@ function renderBench() {
         return value;
       }, 2);
     }
+  };
+
+  const updateFrameRpuMeta = (selection: RpuFrameSelection | null) => {
+    report.frameRpu = selection;
+    if (!frameRpuMeta) return;
+    if (!selection) {
+      frameRpuMeta.innerHTML = `
+        <dt>time</dt><dd>not selected</dd>
+        <dt>sample</dt><dd>unknown</dd>
+        <dt>RPU</dt><dd>unknown</dd>
+        <dt>first NAL</dt><dd>unknown</dd>
+      `;
+      return;
+    }
+
+    const timestamp = selection.timestampUs == null
+      ? 'unknown'
+      : `${(selection.timestampUs / 1_000_000).toFixed(3)} s`;
+    const duration = selection.durationUs == null
+      ? 'unknown'
+      : `${(selection.durationUs / 1_000).toFixed(1)} ms`;
+    const sample = selection.sampleIndex == null
+      ? 'outside parsed sample window'
+      : `#${selection.sampleIndex} @ ${timestamp}, ${duration}, ${selection.isSync ? 'sync' : 'delta'}`;
+    const firstNal = selection.firstRpuNalHex
+      ? `${selection.firstRpuNalSize} bytes at ${selection.firstRpuNalOffset}: ${selection.firstRpuNalHex}`
+      : 'none';
+    frameRpuMeta.innerHTML = `
+      <dt>time</dt><dd>${selection.requestedSeconds.toFixed(3)} s</dd>
+      <dt>sample</dt><dd>${sample}</dd>
+      <dt>RPU</dt><dd>${selection.status}${selection.rpuNalUnits ? `, ${selection.rpuNalUnits} NAL` : ''}</dd>
+      <dt>first NAL</dt><dd>${firstNal}</dd>
+      ${selection.error ? `<dt>note</dt><dd>${selection.error}</dd>` : ''}
+    `;
   };
 
   const formatPreviewSeconds = (seconds: number) => `${seconds.toFixed(seconds < 10 ? 2 : 1)} s`;
@@ -298,11 +343,20 @@ function renderBench() {
         // Some browsers reject seeks before metadata is fully ready.
       }
     }
+    updateSelectedFrameRpuMeta(clamped);
     return clamped;
   };
 
   function readPreviewSeconds(): number {
     return clampPreviewSeconds(Number(previewSecondsInput?.value ?? previewTimeRange?.value ?? 0));
+  }
+
+  function updateSelectedFrameRpuMeta(seconds = readPreviewSeconds()): void {
+    if (!activeParsedSource || !activeTrack?.hevcConfig) {
+      updateFrameRpuMeta(null);
+      return;
+    }
+    updateFrameRpuMeta(inspectRpuForSeconds(activeParsedSource.bytes, activeTrack, seconds));
   }
 
   const previewModeLabel = (mode: RawPreviewMode) => (mode === 'raw-luma' ? 'Raw luma diagnostic' : 'PQ SDR approximation');
@@ -544,8 +598,10 @@ function renderBench() {
     report.mp4 = null;
     report.webCodecs = null;
     report.decoderAdapter = null;
+    report.frameRpu = null;
     report.sdrPreview = null;
     activeTrack = null;
+    activeParsedSource = null;
     report.parseError = null;
     isRenderingRawPreview = false;
     setPreviewMode('raw-luma');
@@ -554,6 +610,7 @@ function renderBench() {
     updatePreviewControlsMax();
     setPreviewControlsDisabled(true);
     clearSdrPreview();
+    updateFrameRpuMeta(null);
     updateDecodeMeta(null);
     updateReport();
 
@@ -568,6 +625,7 @@ function renderBench() {
 
     try {
       const parsed = await parseMediaFile(file);
+      activeParsedSource = parsed;
       const track = parsed.tracks[0] ?? null;
       const lengthSize = track?.hevcConfig?.lengthSize ?? 0;
       const firstSample = track?.samples[0] ?? null;
@@ -607,6 +665,7 @@ function renderBench() {
         firstSampleRpuNalUnits: firstSampleAnalysis.rpuNalUnits.length,
         totalRpuNalUnits: fullAnalysis.rpuNalUnits.length,
       } : null, parsed);
+      updateSelectedFrameRpuMeta();
       updateReport();
       if (track?.hevcConfig) {
         updateDecodeMeta(null, true);
@@ -625,6 +684,7 @@ function renderBench() {
     } catch (error) {
       report.parseError = error instanceof Error ? error.message : String(error);
       updateTrackMeta(null, [], report.parseError);
+      updateFrameRpuMeta(null);
       updateDecodeMeta(null);
       setPreviewControlsDisabled(true);
     }
@@ -647,6 +707,7 @@ function renderBench() {
 
   previewTimeRange?.addEventListener('input', () => {
     writePreviewSeconds(Number(previewTimeRange.value), false);
+    updateReport();
   });
 
   previewTimeRange?.addEventListener('change', () => {
@@ -655,6 +716,7 @@ function renderBench() {
 
   previewSecondsInput?.addEventListener('input', () => {
     writePreviewSeconds(Number(previewSecondsInput.value), false);
+    updateReport();
   });
 
   previewSecondsInput?.addEventListener('change', () => {

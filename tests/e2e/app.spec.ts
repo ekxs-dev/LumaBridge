@@ -30,6 +30,7 @@ test('benchmark page emits a JSON timing report', async ({ page }) => {
   await expect(page.locator('#sdr-preview')).toBeVisible();
   await expect(page.locator('#sdr-preview-time')).toBeVisible();
   await expect(page.locator('#sdr-preview-seconds')).toBeVisible();
+  await expect(page.locator('#frame-rpu-meta')).toContainText('not selected');
   await expect(page.locator('[data-preview-mode="raw-luma"]')).toHaveClass(/active/);
   await expect(page.locator('[data-preview-mode="sdr-approx"]')).toBeVisible();
   await expect(page.locator('#sdr-preview-meta')).toContainText('Debug preview waiting');
@@ -51,6 +52,8 @@ test('benchmark page parses a selected MP4 fixture', async ({ page }) => {
   await expect(page.locator('#track-meta')).toContainText(/hev1\.2\./);
   await expect(page.locator('#track-meta')).toContainText('154 (2 sync)');
   await expect(page.locator('#track-meta')).toContainText('154 total');
+  await expect(page.locator('#frame-rpu-meta')).toContainText('present');
+  await expect(page.locator('#frame-rpu-meta')).toContainText('#0');
   await expect(page.locator('#decode-meta')).not.toContainText('not run');
   await expect(page.locator('#ffmpeg-raw-probe')).toBeVisible();
   await expect(page.locator('#sdr-preview-time')).toBeVisible();
@@ -77,6 +80,7 @@ test('benchmark page parses a selected MKV fixture without MP4 moov failure', as
   await expect(page.locator('#track-meta')).toContainText('matroska');
   await expect(page.locator('#track-meta')).toContainText(/hev1\.2\./);
   await expect(page.locator('#track-meta')).toContainText('154 total');
+  await expect(page.locator('#frame-rpu-meta')).toContainText('present');
   await expect(page.locator('#track-meta')).not.toContainText('MP4 moov box not found');
   await expect(page.locator('#decode-meta')).not.toContainText('not run');
   await expect(page.locator('#ffmpeg-raw-probe')).toBeVisible();
