@@ -20,6 +20,16 @@ export function pqEotf(code: number): number {
   return 10_000 * (numerator / denominator) ** (1 / m1);
 }
 
+export function pqOetf(nits: number): number {
+  const m1 = 2610 / 16384;
+  const m2 = (2523 / 4096) * 128;
+  const c1 = 3424 / 4096;
+  const c2 = (2413 / 4096) * 32;
+  const c3 = (2392 / 4096) * 32;
+  const normalized = Math.max(0, nits / 10_000) ** m1;
+  return ((c1 + c2 * normalized) / (1 + c3 * normalized)) ** m2;
+}
+
 export function yuvBt2020ToRgb(y: number, u: number, v: number): [number, number, number] {
   const cb = u - 0.5;
   const cr = v - 0.5;
@@ -70,4 +80,45 @@ export function reshapeMmr(sig: [number, number, number], constant: number, coef
 export function reinhardToneMap(nits: number, targetNits = 100): number {
   const normalized = Math.max(0, nits / targetNits);
   return normalized / (1 + normalized);
+}
+
+export function bt2390ToneMapPq(
+  code: number,
+  inputMaxPq: number,
+  outputMaxPq = pqOetf(100),
+  inputMinPq = 0,
+  outputMinPq = 0,
+): number {
+  const inputRange = Math.max(1e-6, inputMaxPq - inputMinPq);
+  const minLum = (outputMinPq - inputMinPq) / inputRange;
+  const maxLum = (outputMaxPq - inputMinPq) / inputRange;
+  const kneeOffset = 1;
+  const kneeStart = (1 + kneeOffset) * maxLum - kneeOffset;
+  const blackPower = minLum > 0 ? Math.min(1 / minLum, 4) : 4;
+  const gainInv = 1 + (minLum / Math.max(maxLum, 1e-6)) * (1 - maxLum) ** blackPower;
+  const gain = maxLum < 1 ? 1 / gainInv : 1;
+
+  let x = Math.min(1, Math.max(0, (code - inputMinPq) / inputRange));
+  if (kneeStart < 1 && x >= kneeStart) {
+    const t = Math.min(1, Math.max(0, (x - kneeStart) / (1 - kneeStart)));
+    const t2 = t * t;
+    const t3 = t2 * t;
+    x = (2 * t3 - 3 * t2 + 1) * kneeStart
+      + (t3 - 2 * t2 + t) * (1 - kneeStart)
+      + (-2 * t3 + 3 * t2) * maxLum;
+  }
+
+  if (x < 1) {
+    x += minLum * (1 - x) ** blackPower;
+    x = gain * (x - minLum) + minLum;
+  }
+
+  return Math.min(outputMaxPq, Math.max(outputMinPq, x * inputRange + inputMinPq));
+}
+
+export function bt2390ToneMap(nits: number, sourceMaxNits = 1000, targetNits = 100): number {
+  const inputMaxPq = pqOetf(Math.max(targetNits, sourceMaxNits));
+  const outputMaxPq = pqOetf(targetNits);
+  const mappedPq = bt2390ToneMapPq(pqOetf(nits), inputMaxPq, outputMaxPq);
+  return pqEotf(mappedPq) / targetNits;
 }

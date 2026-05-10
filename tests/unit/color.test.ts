@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   bt2020ToBt709,
+  bt2390ToneMap,
+  bt2390ToneMapPq,
   doviIptToLms,
   doviLmsToBt2020,
   normalizeYuv10Sample,
   pqEotf,
+  pqOetf,
   reinhardToneMap,
   reshapeMmr,
   reshapePolynomial,
@@ -22,6 +25,7 @@ describe('color math references', () => {
   it('computes PQ EOTF anchor points', () => {
     expect(pqEotf(0)).toBeCloseTo(0);
     expect(pqEotf(1)).toBeCloseTo(10000, 0);
+    expect(pqEotf(pqOetf(100))).toBeCloseTo(100, 3);
   });
 
   it('converts BT.2020 YUV to RGB and then BT.709', () => {
@@ -55,5 +59,9 @@ describe('color math references', () => {
   it('keeps fixed tone mapping deterministic', () => {
     expect(reinhardToneMap(100)).toBeCloseTo(0.5);
     expect(reinhardToneMap(0)).toBe(0);
+    expect(bt2390ToneMap(1000, 1000, 100)).toBeCloseTo(1, 3);
+    expect(bt2390ToneMap(100, 1000, 100)).toBeGreaterThan(0.1);
+    expect(bt2390ToneMap(100, 1000, 100)).toBeLessThan(1);
+    expect(bt2390ToneMapPq(pqOetf(1000), pqOetf(1000), pqOetf(100))).toBeCloseTo(pqOetf(100), 4);
   });
 });

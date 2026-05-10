@@ -10,4 +10,12 @@ describe('WGSL shader source', () => {
 
     expect(source).not.toMatch(/\b(?:let|var)\s+meta\b/);
   });
+
+  it('uses the BT.2390 diagnostic tone map instead of the old Reinhard path', () => {
+    const source = fs.readFileSync(shaderPath, 'utf8');
+
+    expect(source).toContain('fn tone_map_bt2390_pq');
+    expect(source).toContain('fn tone_map_bt2390_to_sdr');
+    expect(source).not.toContain('tone_map_reinhard');
+  });
 });
