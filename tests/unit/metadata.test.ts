@@ -41,6 +41,8 @@ describe('compact metadata packing', () => {
     expect(floats[16]).toBe(1);
     expect(floats[28]).toBe(0);
     expect(floats[29]).toBe(1);
+    expect(floats[30]).toBe(0);
+    expect(floats[31]).toBe(0);
     expect([...floats.slice(COMPACT_DOVI_LAYOUT.reshapeHeader, COMPACT_DOVI_LAYOUT.reshapeHeader + 4)]).toEqual([0, 0, 0, 0]);
     expect([...floats.slice(COMPACT_DOVI_LAYOUT.polyCoeffs, COMPACT_DOVI_LAYOUT.polyCoeffs + 4)]).toEqual([0, 1, 0, 0]);
     expect([...floats.slice(COMPACT_DOVI_LAYOUT.polyCoeffs + 32, COMPACT_DOVI_LAYOUT.polyCoeffs + 36)]).toEqual([0, 1, 0, 0]);
@@ -51,6 +53,10 @@ describe('compact metadata packing', () => {
     const metadata = createIdentityDoviMetadata();
     metadata.nonlinearMatrix = [1, 2, 3, 4, 5, 6, 7, 8, 9];
     metadata.linearMatrix = [11, 12, 13, 14, 15, 16, 17, 18, 19];
+    metadata.sourceMinPq = 0.01;
+    metadata.sourceMaxPq = 0.75;
+    metadata.level1MaxPq = 0.44;
+    metadata.level1AvgPq = 0.22;
     metadata.reshapeHeader = [3, 2, 2, 0];
     metadata.pivots = Array.from({ length: 36 }, (_, index) => 100 + index);
     metadata.pieceMeta = Array.from({ length: 96 }, (_, index) => 700 + index);
@@ -69,6 +75,10 @@ describe('compact metadata packing', () => {
       14, 15, 16, 0,
       17, 18, 19, 0,
     ]);
+    expect(floats[COMPACT_DOVI_LAYOUT.sourcePq]).toBeCloseTo(0.01);
+    expect(floats[COMPACT_DOVI_LAYOUT.sourcePq + 1]).toBeCloseTo(0.75);
+    expect(floats[COMPACT_DOVI_LAYOUT.sourcePq + 2]).toBeCloseTo(0.44);
+    expect(floats[COMPACT_DOVI_LAYOUT.sourcePq + 3]).toBeCloseTo(0.22);
     expect(floats[COMPACT_DOVI_LAYOUT.pivots]).toBe(100);
     expect(floats[COMPACT_DOVI_LAYOUT.pieceMeta]).toBe(700);
     expect(floats[COMPACT_DOVI_LAYOUT.polyCoeffs]).toBe(200);

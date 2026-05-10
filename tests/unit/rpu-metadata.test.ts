@@ -30,6 +30,9 @@ describe('RPU metadata WASM adapter', () => {
     expect(result.packed).toHaveLength(COMPACT_DOVI_FLOAT32_COUNT);
     expect(result.probe.sourceMinPq).toBeCloseTo(7 / 4095, 5);
     expect(result.probe.sourceMaxPq).toBeCloseTo(3079 / 4095, 5);
+    expect(result.probe.level1MaxPq).toBeGreaterThan(0);
+    expect(result.probe.level1AvgPq).toBeGreaterThan(0);
+    expect(result.probe.level1MaxPq).toBeGreaterThan(result.probe.level1AvgPq ?? 0);
     expect(result.probe.nonlinearOffset?.[1]).toBeCloseTo(0.5, 5);
     expect(result.probe.firstPolyCoeffs?.[0]).toBeCloseTo(9133 / 8_388_608, 5);
     expect(result.probe.firstPolyCoeffs?.[1]).toBeCloseTo(17_647_044 / 8_388_608, 5);
@@ -43,5 +46,7 @@ describe('RPU metadata WASM adapter', () => {
     expect(result.packed).toHaveLength(COMPACT_DOVI_FLOAT32_COUNT);
     expect(result.probe.sourceMinPq).toBe(0);
     expect(result.probe.sourceMaxPq).toBe(1);
+    expect(result.probe.level1MaxPq).toBe(0);
+    expect(result.probe.level1AvgPq).toBe(0);
   });
 });

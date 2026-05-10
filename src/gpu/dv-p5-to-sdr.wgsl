@@ -18,6 +18,7 @@ struct DoviParams {
   linearMatrix0: vec4<f32>,
   linearMatrix1: vec4<f32>,
   linearMatrix2: vec4<f32>,
+  // x/y: source min/max PQ, z/w: DV Level 1 max/avg PQ.
   sourcePq: vec4<f32>,
   reshapeHeader: vec4<f32>,
   pivots: array<vec4<f32>, 9>,
@@ -313,7 +314,8 @@ fn render_dovi_rpu(y: f32, u: f32, v: f32) -> vec3<f32> {
     lmsLinear
   );
   let rgb2020Nits = dovi_lms_to_bt2020(sourceRgbLinear);
-  return tone_map_bt2390_to_sdr(rgb2020Nits, doviParams.sourcePq.y);
+  let inputMaxPq = select(doviParams.sourcePq.y, doviParams.sourcePq.z, doviParams.sourcePq.z > 0.0);
+  return tone_map_bt2390_to_sdr(rgb2020Nits, inputMaxPq);
 }
 
 @compute @workgroup_size(8, 8)

@@ -1,4 +1,5 @@
 use dolby_vision::rpu::dovi_rpu::DoviRpu;
+use dolby_vision::rpu::extension_metadata::blocks::ExtMetadataBlock;
 use dolby_vision::rpu::rpu_data_mapping::DoviMappingMethod;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -47,6 +48,8 @@ pub struct CompactDoviMetadata {
     pub linear_matrix: [f32; 9],
     pub source_min_pq: f32,
     pub source_max_pq: f32,
+    pub level1_max_pq: f32,
+    pub level1_avg_pq: f32,
     pub reshape_header: [f32; 4],
     pub pivots: Vec<f32>,
     pub piece_meta: Vec<f32>,
@@ -76,6 +79,8 @@ impl Default for CompactDoviMetadata {
             linear_matrix: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
             source_min_pq: 0.0,
             source_max_pq: 1.0,
+            level1_max_pq: 0.0,
+            level1_avg_pq: 0.0,
             reshape_header: [0.0, 0.0, 0.0, 0.0],
             pivots,
             piece_meta,
@@ -211,6 +216,10 @@ fn compact_metadata_from_dovi_rpu(rpu: &DoviRpu) -> Option<CompactDoviMetadata> 
     let color = rpu.vdr_dm_data.as_ref()?;
     let coefficient_scale = 1.0 / ((1u64 << header.coefficient_log2_denom) as f32);
     let pivot_scale = 1.0 / (((1u64 << (header.bl_bit_depth_minus8 + 8)) - 1) as f32);
+    let level1 = color.get_block(1).and_then(|block| match block {
+        ExtMetadataBlock::Level1(level1) => Some(level1),
+        _ => None,
+    });
 
     let mut metadata = CompactDoviMetadata {
         nonlinear_offset: [
@@ -242,6 +251,8 @@ fn compact_metadata_from_dovi_rpu(rpu: &DoviRpu) -> Option<CompactDoviMetadata> 
         ],
         source_min_pq: color.source_min_pq as f32 / 4095.0,
         source_max_pq: color.source_max_pq as f32 / 4095.0,
+        level1_max_pq: level1.map_or(0.0, |block| block.max_pq as f32 / 4095.0),
+        level1_avg_pq: level1.map_or(0.0, |block| block.avg_pq as f32 / 4095.0),
         ..CompactDoviMetadata::default()
     };
 
@@ -379,6 +390,8 @@ pub fn pack_metadata(metadata: &CompactDoviMetadata) -> [f32; COMPACT_DOVI_FLOAT
     );
     packed[COMPACT_DOVI_SOURCE_PQ_OFFSET] = metadata.source_min_pq;
     packed[COMPACT_DOVI_SOURCE_PQ_OFFSET + 1] = metadata.source_max_pq;
+    packed[COMPACT_DOVI_SOURCE_PQ_OFFSET + 2] = metadata.level1_max_pq;
+    packed[COMPACT_DOVI_SOURCE_PQ_OFFSET + 3] = metadata.level1_avg_pq;
     packed[COMPACT_DOVI_RESHAPE_HEADER_OFFSET..COMPACT_DOVI_RESHAPE_HEADER_OFFSET + 4]
         .copy_from_slice(&metadata.reshape_header);
     pack_slice(
@@ -481,6 +494,8 @@ mod tests {
         assert_eq!(packed[16], 1.0);
         assert_eq!(packed[28], 0.0);
         assert_eq!(packed[29], 1.0);
+        assert_eq!(packed[30], 0.0);
+        assert_eq!(packed[31], 0.0);
         assert_eq!(
             &packed[COMPACT_DOVI_RESHAPE_HEADER_OFFSET..COMPACT_DOVI_RESHAPE_HEADER_OFFSET + 4],
             &[0.0, 0.0, 0.0, 0.0]
@@ -504,6 +519,10 @@ mod tests {
         let mut metadata = CompactDoviMetadata::default();
         metadata.nonlinear_matrix = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
         metadata.linear_matrix = [11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0];
+        metadata.source_min_pq = 0.01;
+        metadata.source_max_pq = 0.75;
+        metadata.level1_max_pq = 0.44;
+        metadata.level1_avg_pq = 0.22;
         metadata.pivots[0] = 100.0;
         metadata.piece_meta[0] = 1.0;
         metadata.poly_coeffs[0] = 200.0;
@@ -519,6 +538,10 @@ mod tests {
             &packed[16..28],
             &[11.0, 12.0, 13.0, 0.0, 14.0, 15.0, 16.0, 0.0, 17.0, 18.0, 19.0, 0.0]
         );
+        assert!((packed[COMPACT_DOVI_SOURCE_PQ_OFFSET] - 0.01).abs() < f32::EPSILON);
+        assert!((packed[COMPACT_DOVI_SOURCE_PQ_OFFSET + 1] - 0.75).abs() < f32::EPSILON);
+        assert!((packed[COMPACT_DOVI_SOURCE_PQ_OFFSET + 2] - 0.44).abs() < f32::EPSILON);
+        assert!((packed[COMPACT_DOVI_SOURCE_PQ_OFFSET + 3] - 0.22).abs() < f32::EPSILON);
         assert_eq!(packed[COMPACT_DOVI_PIVOTS_OFFSET], 100.0);
         assert_eq!(packed[COMPACT_DOVI_PIECE_META_OFFSET], 1.0);
         assert_eq!(packed[COMPACT_DOVI_POLY_COEFFS_OFFSET], 200.0);
@@ -558,6 +581,9 @@ mod tests {
         assert!((metadata.linear_matrix[0] - 17081.0 / 16384.0).abs() < 0.0001);
         assert!((metadata.source_min_pq - 7.0 / 4095.0).abs() < 0.0001);
         assert!((metadata.source_max_pq - 3079.0 / 4095.0).abs() < 0.0001);
+        assert!(metadata.level1_max_pq > 0.0);
+        assert!(metadata.level1_avg_pq > 0.0);
+        assert!(metadata.level1_max_pq > metadata.level1_avg_pq);
         assert!(metadata
             .pivots
             .iter()

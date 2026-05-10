@@ -14,6 +14,8 @@ export interface RpuMetadataProbe {
   float32Count: number;
   sourceMinPq: number | null;
   sourceMaxPq: number | null;
+  level1MaxPq: number | null;
+  level1AvgPq: number | null;
   nonlinearOffset: [number, number, number] | null;
   firstPolyCoeffs: [number, number, number] | null;
   error: string | null;
@@ -45,8 +47,10 @@ function probeFromPacked(packed: Float32Array, elapsedMs: number, source: RpuMet
     source,
     elapsedMs,
     float32Count: packed.length,
-    sourceMinPq: packed.length > 28 ? packed[28] : null,
-    sourceMaxPq: packed.length > 29 ? packed[29] : null,
+    sourceMinPq: packed.length > COMPACT_DOVI_LAYOUT.sourcePq ? packed[COMPACT_DOVI_LAYOUT.sourcePq] : null,
+    sourceMaxPq: packed.length > COMPACT_DOVI_LAYOUT.sourcePq + 1 ? packed[COMPACT_DOVI_LAYOUT.sourcePq + 1] : null,
+    level1MaxPq: packed.length > COMPACT_DOVI_LAYOUT.sourcePq + 2 ? packed[COMPACT_DOVI_LAYOUT.sourcePq + 2] : null,
+    level1AvgPq: packed.length > COMPACT_DOVI_LAYOUT.sourcePq + 3 ? packed[COMPACT_DOVI_LAYOUT.sourcePq + 3] : null,
     nonlinearOffset: packed.length >= 3 ? [packed[0], packed[1], packed[2]] : null,
     firstPolyCoeffs: packed.length > COMPACT_DOVI_LAYOUT.polyCoeffs + 2
       ? [

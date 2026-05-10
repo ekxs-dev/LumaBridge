@@ -346,7 +346,7 @@ function renderBench() {
     const metadata = report.rpuMetadata;
     const metadataLabel = metadata
       ? metadata.source === 'wasm' && metadata.ok
-        ? `wasm parsed, PQ ${metadata.sourceMinPq?.toFixed(4)}-${metadata.sourceMaxPq?.toFixed(4)}`
+        ? `wasm parsed, source PQ ${metadata.sourceMinPq?.toFixed(4)}-${metadata.sourceMaxPq?.toFixed(4)}, L1 ${metadata.level1MaxPq?.toFixed(4)}/${metadata.level1AvgPq?.toFixed(4)}`
         : `${metadata.source}${metadata.error ? `: ${metadata.error}` : ''}`
       : selection.firstRpuPayload
         ? 'waiting for render'

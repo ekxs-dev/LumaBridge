@@ -22,6 +22,8 @@ export interface DoviCompactMetadata {
   linearMatrix: number[];
   sourceMinPq: number;
   sourceMaxPq: number;
+  level1MaxPq: number;
+  level1AvgPq: number;
   reshapeHeader: [number, number, number, number];
   pivots: number[];
   pieceMeta: number[];
@@ -59,6 +61,8 @@ export function packCompactDoviMetadata(metadata: DoviCompactMetadata): ArrayBuf
   packVec4Rows(floats, COMPACT_DOVI_LAYOUT.linearMatrix, metadata.linearMatrix, 3, 3);
   floats[COMPACT_DOVI_LAYOUT.sourcePq] = metadata.sourceMinPq;
   floats[COMPACT_DOVI_LAYOUT.sourcePq + 1] = metadata.sourceMaxPq;
+  floats[COMPACT_DOVI_LAYOUT.sourcePq + 2] = metadata.level1MaxPq;
+  floats[COMPACT_DOVI_LAYOUT.sourcePq + 3] = metadata.level1AvgPq;
   floats.set(metadata.reshapeHeader, COMPACT_DOVI_LAYOUT.reshapeHeader);
   floats.set(metadata.pivots.slice(0, 36), COMPACT_DOVI_LAYOUT.pivots);
   floats.set(metadata.pieceMeta.slice(0, 96), COMPACT_DOVI_LAYOUT.pieceMeta);
@@ -89,6 +93,8 @@ export function createIdentityDoviMetadata(): DoviCompactMetadata {
     linearMatrix: [1, 0, 0, 0, 1, 0, 0, 0, 1],
     sourceMinPq: 0,
     sourceMaxPq: 1,
+    level1MaxPq: 0,
+    level1AvgPq: 0,
     reshapeHeader: [0, 0, 0, 0],
     pivots,
     pieceMeta,

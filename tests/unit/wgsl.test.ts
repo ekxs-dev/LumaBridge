@@ -18,4 +18,11 @@ describe('WGSL shader source', () => {
     expect(source).toContain('fn tone_map_bt2390_to_sdr');
     expect(source).not.toContain('tone_map_reinhard');
   });
+
+  it('uses DV Level 1 max PQ as the tone mapping peak when present', () => {
+    const source = fs.readFileSync(shaderPath, 'utf8');
+
+    expect(source).toContain('x/y: source min/max PQ, z/w: DV Level 1 max/avg PQ');
+    expect(source).toContain('select(doviParams.sourcePq.y, doviParams.sourcePq.z, doviParams.sourcePq.z > 0.0)');
+  });
 });
