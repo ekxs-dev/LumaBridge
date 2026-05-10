@@ -4,8 +4,10 @@ import { evaluateCapabilities, probeBrowserCapabilities } from './core/capabilit
 import {
   probeDecoderAdapters,
   probeFfmpegHevcPacket,
+  probeFfmpegRawSegment,
   probeFfmpegWasmAdapter,
   type DecoderAdapterProbe,
+  type FfmpegRawSegmentProbe,
 } from './core/decoder-adapter';
 import { analyzeMp4HevcSamples, parseLengthPrefixedHevcSample } from './core/hevc';
 import { buildI420P10GpuUpload, type GpuPreviewMode } from './core/gpu-upload';
@@ -32,6 +34,7 @@ import {
 } from './core/webgpu-external-preview';
 import { uploadI420P10ToWebGpu, type WebGpuUploadProbe } from './core/webgpu-upload';
 import {
+  evaluateWebCodecsRawAccess,
   renderWebCodecsCanvasPreview,
   type DecodedFrameProbe,
   type WebCodecsCanvasPreviewStats,
@@ -160,6 +163,7 @@ function renderBench() {
     webCodecsCanvasPreview: null as WebCodecsCanvasPreviewStats | null,
     webCodecsExternalPreview: null as WebGpuExternalPreviewStats | null,
     decoderAdapter: null as DecoderAdapterProbe | null,
+    rawSegment: null as FfmpegRawSegmentProbe | null,
     frameRpu: null as RpuFrameSelection | null,
     rpuMetadata: null as RpuMetadataProbe | null,
     gpuUpload: null as WebGpuUploadProbe | null,
@@ -368,6 +372,9 @@ function renderBench() {
       }, 2);
     }
   };
+
+  const currentRawAccess = () => report.decoderAdapter?.rawAccess
+    ?? (report.webCodecs ? evaluateWebCodecsRawAccess(report.webCodecs) : null);
 
   const realtimeAdapterLabel = () => {
     const adapter = report.decoderAdapter;
@@ -652,6 +659,28 @@ function renderBench() {
     return clamped;
   };
 
+  const writePreviewSecondsDisplayOnly = (seconds: number) => {
+    const clamped = clampPreviewSeconds(seconds);
+    const value = clamped.toFixed(2);
+    if (previewTimeRange) previewTimeRange.value = value;
+    if (previewSecondsInput) previewSecondsInput.value = value;
+    return clamped;
+  };
+
+  const expectedI420P10BytesForTrack = (track: Mp4VideoTrack) => {
+    const y = track.width * track.height * 2;
+    const chroma = Math.ceil(track.width / 2) * Math.ceil(track.height / 2) * 2;
+    return y + chroma * 2;
+  };
+
+  const realtimeSegmentFrameCount = (track: Mp4VideoTrack, targetFps: number) => {
+    const frameBytes = expectedI420P10BytesForTrack(track);
+    const maxSegmentBytes = 96 * 1024 * 1024;
+    const maxFramesByMemory = Math.max(1, Math.floor(maxSegmentBytes / Math.max(1, frameBytes)));
+    const targetWindowFrames = Math.max(2, Math.ceil(targetFps * 2));
+    return Math.max(1, Math.min(12, maxFramesByMemory, targetWindowFrames));
+  };
+
   function readPreviewSeconds(): number {
     return clampPreviewSeconds(Number(previewSecondsInput?.value ?? previewTimeRange?.value ?? 0));
   }
@@ -851,6 +880,7 @@ function renderBench() {
         selected: 'ffmpeg.wasm',
         status: 'fallback-needed',
         webCodecs: report.webCodecs,
+        rawAccess: currentRawAccess(),
         ffmpegWasm: null,
         fallbackReason: reason,
       };
@@ -954,9 +984,10 @@ function renderBench() {
     const adapter = realtimeAdapterLabel();
     const hasStrictRealtime = adapter === 'webcodecs' && report.decoderAdapter?.webCodecs?.format === 'I420P10';
     const realtimeAdapter = 'ffmpeg.wasm' as const;
+    const segmentFrameCount = realtimeSegmentFrameCount(track, targetFps);
     const note = hasStrictRealtime
       ? 'WebCodecs strict realtime is eligible; this control currently runs the ffmpeg.wasm fallback preview until streaming copyTo is wired.'
-      : 'ffmpeg.wasm fallback preview advances on wall clock and skips ahead when decode is slower than target FPS.';
+      : `ffmpeg.wasm fallback decodes ${segmentFrameCount}-frame raw chunks instead of seeking once per frame; it still skips ahead when decode is slower than target FPS.`;
     const startedAtMs = performance.now();
     const startSeconds = readPreviewSeconds();
     const runVersion = selectionVersion;
@@ -982,11 +1013,11 @@ function renderBench() {
     updateReport();
 
     while (!signal.aborted && runId === realtimeRunVersion && runVersion === selectionVersion) {
-      const frameStartedAt = performance.now();
+      const segmentStartedAt = performance.now();
       const seconds = realtimeSecondsForWallClock({
         startSeconds,
         startedAtMs,
-        nowMs: frameStartedAt,
+        nowMs: segmentStartedAt,
         durationSeconds: previewDurationLimit(),
       });
       writePreviewSeconds(seconds, false);
@@ -999,50 +1030,51 @@ function renderBench() {
       isRenderingRawPreview = true;
       setPreviewControlsDisabled(false);
       try {
-        const ffmpegWasm = await probeFfmpegWasmAdapter(file, track, {
-          decodeRawFrame: true,
+        const rawSegment = await probeFfmpegRawSegment(file, track, {
           seekSeconds: seconds,
-          timeoutMs: 60_000,
+          frameCount: segmentFrameCount,
+          outputFps: targetFps,
+          timeoutMs: 120_000,
         });
+        report.rawSegment = rawSegment;
         if (signal.aborted || runId !== realtimeRunVersion || runVersion !== selectionVersion) break;
         if (!report.decoderAdapter) {
           report.decoderAdapter = {
             selected: 'ffmpeg.wasm',
-            status: 'fallback-available',
+            status: rawSegment.ok ? 'fallback-available' : 'failed',
             webCodecs: report.webCodecs,
-            ffmpegWasm,
+            rawAccess: currentRawAccess(),
+            ffmpegWasm: null,
             fallbackReason: 'Realtime fallback preview requested.',
           };
         } else {
-          report.decoderAdapter.ffmpegWasm = ffmpegWasm;
-          report.decoderAdapter.selected = ffmpegWasm.available ? 'ffmpeg.wasm' : report.decoderAdapter.selected;
-          report.decoderAdapter.status = ffmpegWasm.rawFrame.ok ? 'fallback-available' : 'failed';
+          report.decoderAdapter.selected = 'ffmpeg.wasm';
+          report.decoderAdapter.status = rawSegment.ok ? 'fallback-available' : 'failed';
         }
         updateDecodeMeta(report.decoderAdapter);
 
-        const rawFrame = ffmpegWasm.rawFrame;
-        if (!rawFrame.ok || !rawFrame.data) {
+        if (!rawSegment.ok || !rawSegment.data || !rawSegment.frameBytes || rawSegment.frameCount < 1) {
           const failures = report.realtimePreview.consecutiveFailures + 1;
           updateRealtimeMeta({
             ...report.realtimePreview,
             status: failures >= 2 ? 'failed' : 'running',
             consecutiveFailures: failures,
-            error: rawFrame.error ?? ffmpegWasm.error ?? 'ffmpeg.wasm realtime raw-frame decode failed.',
+            error: rawSegment.error ?? 'ffmpeg.wasm realtime raw-segment decode failed.',
           });
           if (failures < 2) continue;
           break;
         }
 
         if (shouldProbeRpuPacketWithFfmpeg()) {
-          const packetProbe = await probeFfmpegHevcPacket(file, { seekSeconds: seconds });
+          const packetProbe = await probeFfmpegHevcPacket(file, { seekSeconds: rawSegment.seekSeconds });
           if (signal.aborted || runId !== realtimeRunVersion || runVersion !== selectionVersion) break;
           updateFrameRpuMeta(packetProbe.ok && packetProbe.data
             ? inspectRpuAnnexBPacket(packetProbe.data, packetProbe.seekSeconds)
             : {
-                requestedSeconds: seconds,
+                requestedSeconds: rawSegment.seekSeconds,
                 status: 'invalid-sample',
                 sampleIndex: null,
-                timestampUs: Math.round(seconds * 1_000_000),
+                timestampUs: Math.round(rawSegment.seekSeconds * 1_000_000),
                 durationUs: null,
                 isSync: null,
                 rpuNalUnits: 0,
@@ -1054,21 +1086,38 @@ function renderBench() {
               });
         }
 
-        await renderRawFrameForCurrentMode(rawFrame.data, track, rawFrame.seekSeconds, rawFrame.elapsedMs, runVersion);
-        if (signal.aborted || runId !== realtimeRunVersion || runVersion !== selectionVersion) break;
-        const frameElapsedMs = performance.now() - frameStartedAt;
-        updateRealtimeMeta(updateRealtimeFrameReport(report.realtimePreview, {
-          nowMs: performance.now(),
-          startedAtMs,
-          frameElapsedMs,
-          currentSeconds: seconds,
-        }));
-        updateReport();
         const frameIntervalMs = 1000 / targetFps;
-        const delayMs = Math.max(0, frameIntervalMs - (performance.now() - frameStartedAt));
-        if (delayMs > 0) {
-          await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+        const decodeElapsedPerFrame = rawSegment.elapsedMs / Math.max(1, rawSegment.frameCount);
+        for (let frameIndex = 0; frameIndex < rawSegment.frameCount; frameIndex += 1) {
+          if (signal.aborted || runId !== realtimeRunVersion || runVersion !== selectionVersion) break;
+          const frameSeconds = rawSegment.seekSeconds + frameIndex / targetFps;
+          const maxPreviewSeconds = previewDurationLimit();
+          if (frameSeconds >= maxPreviewSeconds && maxPreviewSeconds > 0) {
+            updateRealtimeMeta({ ...report.realtimePreview, status: 'ended', currentSeconds: frameSeconds });
+            break;
+          }
+          const presentStartedAt = performance.now();
+          writePreviewSecondsDisplayOnly(frameSeconds);
+          const frameOffset = frameIndex * rawSegment.frameBytes;
+          const frameData = rawSegment.data.subarray(frameOffset, frameOffset + rawSegment.frameBytes);
+          await renderRawFrameForCurrentMode(frameData, track, frameSeconds, decodeElapsedPerFrame, runVersion);
+          if (signal.aborted || runId !== realtimeRunVersion || runVersion !== selectionVersion) break;
+          const frameElapsedMs = frameIndex === 0
+            ? performance.now() - segmentStartedAt
+            : performance.now() - presentStartedAt;
+          updateRealtimeMeta(updateRealtimeFrameReport(report.realtimePreview, {
+            nowMs: performance.now(),
+            startedAtMs,
+            frameElapsedMs,
+            currentSeconds: frameSeconds,
+          }));
+          updateReport();
+          const delayMs = Math.max(0, frameIntervalMs - (performance.now() - presentStartedAt));
+          if (delayMs > 0) {
+            await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+          }
         }
+        if (!isRealtimeRunning(report.realtimePreview)) break;
       } catch (error) {
         updateRealtimeMeta({
           ...report.realtimePreview,
@@ -1165,6 +1214,9 @@ function renderBench() {
         ? `${probe.copyTo.allocationSize} bytes, ${probe.copyTo.layout.length} planes, ${probe.copyTo.elapsedMs.toFixed(1)} ms`
         : probe.copyTo.error
       : 'not attempted';
+    const rawAccess = adapter.rawAccess ?? evaluateWebCodecsRawAccess(probe);
+    const rawAccessLabel = `${rawAccess.label}${rawAccess.canCorrectDv ? '; correct DV raw path eligible' : '; preview/fallback only'}`;
+    const rawAccessReason = rawAccess.reasons[0] ? ` ${rawAccess.reasons[0]}` : '';
     const fallback = adapter.fallbackReason
       ? adapter.ffmpegWasm
         ? `${adapter.fallbackReason}; ffmpeg.wasm ${adapter.ffmpegWasm.available ? `available in ${adapter.ffmpegWasm.elapsedMs.toFixed(1)} ms${adapter.ffmpegWasm.rawFrame.attempted ? `; raw @ ${formatPreviewSeconds(adapter.ffmpegWasm.rawFrame.seekSeconds)} ${adapter.ffmpegWasm.rawFrame.ok ? 'ok' : `failed: ${adapter.ffmpegWasm.rawFrame.error}`}` : ''}` : `failed: ${adapter.ffmpegWasm.error ?? 'unknown error'}`}`
@@ -1187,6 +1239,7 @@ function renderBench() {
       <dt>format</dt><dd>${probe.format ?? 'unknown'} ${probe.codedWidth && probe.codedHeight ? `${probe.codedWidth} x ${probe.codedHeight}` : ''}</dd>
       <dt>color</dt><dd>${color}</dd>
       <dt>copyTo</dt><dd>${copyTo}</dd>
+      <dt>raw access</dt><dd>${rawAccessLabel}.${rawAccessReason}</dd>
       <dt>fallback</dt><dd>${fallback}</dd>
       ${fastPreview ? `<dt>fast path</dt><dd>${fastPreview}</dd>` : ''}
       ${externalPreview ? `<dt>external path</dt><dd>${externalPreview}</dd>` : ''}
@@ -1229,6 +1282,7 @@ function renderBench() {
     report.webCodecsCanvasPreview = null;
     report.webCodecsExternalPreview = null;
     report.decoderAdapter = null;
+    report.rawSegment = null;
     report.frameRpu = null;
     report.rpuMetadata = null;
     report.gpuUpload = null;

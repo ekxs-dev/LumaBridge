@@ -33,6 +33,18 @@ export interface FrameCopyProbe {
   error: string | null;
 }
 
+export type WebCodecsRawAccessMode = 'strict-i420p10' | 'known-non-strict-format' | 'opaque-frame' | 'unsupported';
+
+export interface WebCodecsRawAccessDecision {
+  mode: WebCodecsRawAccessMode;
+  canPreview: boolean;
+  canExposeRawPlanes: boolean;
+  canCopyI420P10: boolean;
+  canCorrectDv: boolean;
+  label: string;
+  reasons: string[];
+}
+
 export interface WebCodecsCanvasPreviewStats {
   attempted: boolean;
   ok: boolean;
@@ -139,6 +151,64 @@ export const __webcodecsTestHooks = {
   uniqueCodecCandidates,
   findDecodeStartSampleIndex,
 };
+
+export function evaluateWebCodecsRawAccess(probe: DecodedFrameProbe): WebCodecsRawAccessDecision {
+  if (!probe.supported || probe.decodedFrames < 1) {
+    return {
+      mode: 'unsupported',
+      canPreview: false,
+      canExposeRawPlanes: false,
+      canCopyI420P10: false,
+      canCorrectDv: false,
+      label: 'unsupported',
+      reasons: [probe.error ?? 'WebCodecs did not decode a frame.'],
+    };
+  }
+
+  if (probe.format == null) {
+    return {
+      mode: 'opaque-frame',
+      canPreview: true,
+      canExposeRawPlanes: false,
+      canCopyI420P10: false,
+      canCorrectDv: false,
+      label: 'preview-only opaque frame',
+      reasons: [
+        'VideoFrame.format is null.',
+        'allocationSize()/copyTo() cannot expose raw YUV planes for this frame.',
+        'Fast WebCodecs/WebGPU previews may start from browser-converted RGB and are not color-accurate DV SDR.',
+      ],
+    };
+  }
+
+  if (probe.format === 'I420P10') {
+    const canCopyI420P10 = Boolean(probe.copyTo?.ok);
+    return {
+      mode: 'strict-i420p10',
+      canPreview: true,
+      canExposeRawPlanes: canCopyI420P10,
+      canCopyI420P10,
+      canCorrectDv: canCopyI420P10,
+      label: canCopyI420P10 ? 'strict I420P10 raw path' : 'I420P10 visible, copyTo blocked',
+      reasons: canCopyI420P10
+        ? ['VideoFrame.format is I420P10 and copyTo() returned a valid 3-plane layout.']
+        : [probe.copyTo?.error ?? 'VideoFrame.format is I420P10, but copyTo() did not return a valid raw layout.'],
+    };
+  }
+
+  return {
+    mode: 'known-non-strict-format',
+    canPreview: true,
+    canExposeRawPlanes: true,
+    canCopyI420P10: false,
+    canCorrectDv: false,
+    label: `raw format ${probe.format}, not strict DV`,
+    reasons: [
+      `VideoFrame.format is ${probe.format}, not I420P10.`,
+      'This may support a generic raw-preview path, but it is not the current correct DV P5 10-bit base-layer path.',
+    ],
+  };
+}
 
 export async function renderWebCodecsCanvasPreview(
   fileBytes: Uint8Array,

@@ -36,4 +36,32 @@ describe('capability decision', () => {
       'RPU_REQUIRED',
     ]);
   });
+
+  it('treats an observed null VideoFrame format as opaque preview only', () => {
+    const report = evaluateCapabilities({
+      hasWebGPU: true,
+      hasWebCodecs: true,
+      hevcSupported: true,
+      outputFormat: null,
+      rpuPresent: true,
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.failures).toEqual(['I420P10_REQUIRED']);
+    expect(report.warnings).toContain('VideoFrame output is opaque; raw copyTo() planes are unavailable.');
+    expect(report.warnings).not.toContain('VideoFrame output format has not been observed yet.');
+  });
+
+  it('keeps an omitted VideoFrame format as an unobserved warning', () => {
+    const report = evaluateCapabilities({
+      hasWebGPU: true,
+      hasWebCodecs: true,
+      hevcSupported: true,
+      rpuPresent: true,
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.failures).toEqual([]);
+    expect(report.warnings).toContain('VideoFrame output format has not been observed yet.');
+  });
 });

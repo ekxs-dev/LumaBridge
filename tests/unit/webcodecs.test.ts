@@ -4,9 +4,11 @@ import path from 'node:path';
 import {
   __webcodecsTestHooks,
   buildVideoDecoderConfig,
+  evaluateWebCodecsRawAccess,
   planEncodedChunk,
   sampleDurationUs,
   sampleTimestampUs,
+  type DecodedFrameProbe,
 } from '../../src/core/webcodecs';
 import { parseMp4 } from '../../src/core/mp4';
 
@@ -77,5 +79,71 @@ describe('WebCodecs planning', () => {
     expect(__webcodecsTestHooks.findDecodeStartSampleIndex(track, 119_000)).toBe(0);
     expect(__webcodecsTestHooks.findDecodeStartSampleIndex(track, 120_000)).toBe(3);
     expect(__webcodecsTestHooks.findDecodeStartSampleIndex(track, 199_000)).toBe(3);
+  });
+
+  it('classifies null-format WebCodecs frames as opaque preview only', () => {
+    const decision = evaluateWebCodecsRawAccess({
+      supported: true,
+      codec: 'hev1.2.6.L150.B0',
+      decodedFrames: 1,
+      elapsedMs: 3,
+      format: null,
+      timestamp: 0,
+      codedWidth: 3840,
+      codedHeight: 1608,
+      displayWidth: 3840,
+      displayHeight: 1608,
+      colorSpace: { primaries: 'bt709', transfer: 'bt709', matrix: 'bt709' },
+      copyTo: {
+        attempted: false,
+        ok: false,
+        elapsedMs: 0,
+        allocationSize: null,
+        layout: [],
+        error: 'copyTo raw path requires I420P10, got null.',
+      },
+      error: null,
+    });
+
+    expect(decision.mode).toBe('opaque-frame');
+    expect(decision.canPreview).toBe(true);
+    expect(decision.canCorrectDv).toBe(false);
+    expect(decision.label).toContain('preview-only');
+  });
+
+  it('classifies a valid I420P10 copyTo layout as the strict DV raw path', () => {
+    const probe: DecodedFrameProbe = {
+      supported: true,
+      codec: 'hev1.2.6.L150.B0',
+      decodedFrames: 1,
+      elapsedMs: 3,
+      format: 'I420P10',
+      timestamp: 0,
+      codedWidth: 3840,
+      codedHeight: 1608,
+      displayWidth: 3840,
+      displayHeight: 1608,
+      colorSpace: { primaries: 'bt2020', transfer: 'pq', matrix: 'bt2020-ncl' },
+      copyTo: {
+        attempted: true,
+        ok: true,
+        elapsedMs: 2,
+        allocationSize: 18_524_160,
+        layout: [
+          { offset: 0, stride: 7680 },
+          { offset: 12_349_440, stride: 3840 },
+          { offset: 15_436_800, stride: 3840 },
+        ],
+        error: null,
+      },
+      error: null,
+    };
+
+    const decision = evaluateWebCodecsRawAccess(probe);
+
+    expect(decision.mode).toBe('strict-i420p10');
+    expect(decision.canExposeRawPlanes).toBe(true);
+    expect(decision.canCopyI420P10).toBe(true);
+    expect(decision.canCorrectDv).toBe(true);
   });
 });

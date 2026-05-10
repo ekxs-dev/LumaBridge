@@ -4,7 +4,12 @@ import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import coreUrl from '@ffmpeg/core?url';
 import wasmUrl from '@ffmpeg/core/wasm?url';
 import type { Mp4VideoTrack } from './mp4';
-import { decodeFirstFrameFromMp4Track, type DecodedFrameProbe } from './webcodecs';
+import {
+  decodeFirstFrameFromMp4Track,
+  evaluateWebCodecsRawAccess,
+  type DecodedFrameProbe,
+  type WebCodecsRawAccessDecision,
+} from './webcodecs';
 
 export type DecoderAdapterName = 'webcodecs' | 'ffmpeg.wasm';
 export type DecoderAdapterStatus = 'not-run' | 'success' | 'fallback-needed' | 'fallback-available' | 'failed';
@@ -18,6 +23,22 @@ export interface FfmpegRawFrameProbe {
   format: 'I420P10' | null;
   bytes: number | null;
   expectedBytes: number | null;
+  data: Uint8Array | null;
+  error: string | null;
+}
+
+export interface FfmpegRawSegmentProbe {
+  attempted: boolean;
+  ok: boolean;
+  elapsedMs: number;
+  seekSeconds: number;
+  inputMode: 'workerfs' | 'memfs' | null;
+  format: 'I420P10' | null;
+  requestedFrames: number;
+  frameCount: number;
+  frameBytes: number | null;
+  bytes: number | null;
+  outputFps: number | null;
   data: Uint8Array | null;
   error: string | null;
 }
@@ -48,6 +69,7 @@ export interface DecoderAdapterProbe {
   selected: DecoderAdapterName | null;
   status: DecoderAdapterStatus;
   webCodecs: DecodedFrameProbe | null;
+  rawAccess: WebCodecsRawAccessDecision | null;
   ffmpegWasm: FfmpegWasmProbe | null;
   fallbackReason: string | null;
 }
@@ -62,7 +84,8 @@ function shouldFallbackFromWebCodecs(probe: DecodedFrameProbe): string | null {
   if (!probe.supported) return probe.error ?? 'WebCodecs did not support the HEVC decoder config.';
   if (probe.error) return probe.error;
   if (probe.decodedFrames < 1) return 'WebCodecs decoded no frames.';
-  if (probe.format !== 'I420P10') return `WebCodecs returned ${probe.format ?? 'unknown'} instead of I420P10.`;
+  if (probe.format == null) return 'WebCodecs returned an opaque frame (format null); raw I420P10 copyTo is unavailable, so this path is preview-only.';
+  if (probe.format !== 'I420P10') return `WebCodecs returned ${probe.format} instead of I420P10.`;
   if (!probe.copyTo?.ok) return probe.copyTo?.error ?? 'VideoFrame.copyTo() did not produce an I420P10 layout.';
   return null;
 }
@@ -121,6 +144,15 @@ function safeFileName(name: string): string {
 
 function formatSeekSeconds(value: number): string {
   return Math.max(0, value).toFixed(3);
+}
+
+function formatFps(value: number): string {
+  const safeValue = Math.min(60, Math.max(0.01, Number.isFinite(value) ? value : 1));
+  return Number.isInteger(safeValue) ? String(safeValue) : safeValue.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function clampSegmentFrameCount(value: number): number {
+  return Math.min(48, Math.max(1, Math.floor(Number.isFinite(value) ? value : 1)));
 }
 
 function hybridSeekArgs(seekSeconds: number): { input: string[]; output: string[] } {
@@ -231,6 +263,149 @@ async function decodeRawFrameWithFfmpeg(
       format: null,
       bytes: null,
       expectedBytes,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    try {
+      await ffmpeg.deleteFile(outputPath);
+    } catch {
+      // Output may not exist when decode fails.
+    }
+    if (copied) {
+      try {
+        await ffmpeg.deleteFile(inputPath);
+      } catch {
+        // Ignore cleanup errors from the wasm FS.
+      }
+    }
+    if (mounted) {
+      try {
+        await ffmpeg.unmount(mountPoint);
+      } catch {
+        // Ignore cleanup errors from WorkerFS.
+      }
+    }
+  }
+}
+
+async function decodeRawSegmentWithFfmpeg(
+  ffmpeg: FFmpeg,
+  file: File,
+  track: Mp4VideoTrack,
+  seekSeconds: number,
+  frameCount: number,
+  timeoutMs: number,
+  outputFps?: number,
+): Promise<FfmpegRawSegmentProbe> {
+  const startedAt = performance.now();
+  const safeSeekSeconds = Math.max(0, Number.isFinite(seekSeconds) ? seekSeconds : 0);
+  const requestedFrames = clampSegmentFrameCount(frameCount);
+  const frameBytes = expectedI420P10Bytes(track);
+  const outputPath = '/segment.yuv';
+  const mountPoint = '/input';
+  const fileName = safeFileName(file.name);
+  let inputPath = `${mountPoint}/${fileName}`;
+  let inputMode: FfmpegRawSegmentProbe['inputMode'] = 'workerfs';
+  let mounted = false;
+  let copied = false;
+
+  try {
+    try {
+      await ffmpeg.createDir(mountPoint);
+    } catch {
+      // The directory may already exist from a previous probe.
+    }
+
+    try {
+      await ffmpeg.mount(FFFSType.WORKERFS, { files: [file] }, mountPoint);
+      mounted = true;
+    } catch (mountError) {
+      if (file.size > MEMFS_COPY_LIMIT_BYTES) throw mountError;
+      inputMode = 'memfs';
+      inputPath = `/input-${fileName}`;
+      await ffmpeg.writeFile(inputPath, await fetchFile(file));
+      copied = true;
+    }
+
+    const seekArgs = hybridSeekArgs(safeSeekSeconds);
+    const fpsArgs = outputFps && Number.isFinite(outputFps) && outputFps > 0
+      ? ['-vf', `fps=${formatFps(outputFps)}`]
+      : [];
+    const exitCode = await ffmpeg.exec([
+      '-v',
+      'error',
+      '-y',
+      ...seekArgs.input,
+      '-i',
+      inputPath,
+      ...seekArgs.output,
+      '-map',
+      '0:v:0',
+      '-frames:v',
+      String(requestedFrames),
+      '-an',
+      '-sn',
+      '-dn',
+      ...fpsArgs,
+      '-f',
+      'rawvideo',
+      '-pix_fmt',
+      'yuv420p10le',
+      outputPath,
+    ], timeoutMs);
+
+    if (exitCode !== 0) {
+      return {
+        attempted: true,
+        ok: false,
+        elapsedMs: performance.now() - startedAt,
+        seekSeconds: safeSeekSeconds,
+        inputMode,
+        format: null,
+        requestedFrames,
+        frameCount: 0,
+        frameBytes,
+        bytes: null,
+        outputFps: outputFps ?? null,
+        data: null,
+        error: `ffmpeg exited with code ${exitCode}.`,
+      };
+    }
+
+    const raw = await ffmpeg.readFile(outputPath);
+    const data = typeof raw === 'string' ? new TextEncoder().encode(raw) : raw;
+    const bytes = data.byteLength;
+    const decodedFrames = Math.floor(bytes / frameBytes);
+    const hasWholeFrames = decodedFrames > 0 && bytes % frameBytes === 0;
+    return {
+      attempted: true,
+      ok: hasWholeFrames,
+      elapsedMs: performance.now() - startedAt,
+      seekSeconds: safeSeekSeconds,
+      inputMode,
+      format: 'I420P10',
+      requestedFrames,
+      frameCount: decodedFrames,
+      frameBytes,
+      bytes,
+      outputFps: outputFps ?? null,
+      data,
+      error: hasWholeFrames ? null : `Expected a whole number of ${frameBytes}-byte frames, got ${bytes} bytes.`,
+    };
+  } catch (error) {
+    return {
+      attempted: true,
+      ok: false,
+      elapsedMs: performance.now() - startedAt,
+      seekSeconds: safeSeekSeconds,
+      inputMode,
+      format: null,
+      requestedFrames,
+      frameCount: 0,
+      frameBytes,
+      bytes: null,
+      outputFps: outputFps ?? null,
       data: null,
       error: error instanceof Error ? error.message : String(error),
     };
@@ -390,6 +565,43 @@ export async function probeFfmpegHevcPacket(
   }
 }
 
+export async function probeFfmpegRawSegment(
+  file: File,
+  track: Mp4VideoTrack,
+  options: { seekSeconds?: number; frameCount?: number; outputFps?: number; timeoutMs?: number } = {},
+): Promise<FfmpegRawSegmentProbe> {
+  const safeSeekSeconds = Math.max(0, Number.isFinite(options.seekSeconds) ? options.seekSeconds ?? 0 : 0);
+  const requestedFrames = clampSegmentFrameCount(options.frameCount ?? 4);
+  try {
+    const ffmpeg = await loadFfmpegWasm();
+    return await decodeRawSegmentWithFfmpeg(
+      ffmpeg,
+      file,
+      track,
+      safeSeekSeconds,
+      requestedFrames,
+      options.timeoutMs ?? 120_000,
+      options.outputFps,
+    );
+  } catch (error) {
+    return {
+      attempted: true,
+      ok: false,
+      elapsedMs: 0,
+      seekSeconds: safeSeekSeconds,
+      inputMode: null,
+      format: null,
+      requestedFrames,
+      frameCount: 0,
+      frameBytes: expectedI420P10Bytes(track),
+      bytes: null,
+      outputFps: options.outputFps ?? null,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export async function probeFfmpegWasmAdapter(
   file?: File,
   track?: Mp4VideoTrack,
@@ -444,12 +656,14 @@ export async function probeDecoderAdapters(
   file?: File,
 ): Promise<DecoderAdapterProbe> {
   const webCodecs = await decodeFirstFrameFromMp4Track(fileBytes, track);
+  const rawAccess = evaluateWebCodecsRawAccess(webCodecs);
   const fallbackReason = shouldFallbackFromWebCodecs(webCodecs);
   if (!fallbackReason) {
     return {
       selected: 'webcodecs',
       status: 'success',
       webCodecs,
+      rawAccess,
       ffmpegWasm: null,
       fallbackReason: null,
     };
@@ -460,6 +674,7 @@ export async function probeDecoderAdapters(
     selected: ffmpegWasm.available ? 'ffmpeg.wasm' : null,
     status: ffmpegWasm.available ? 'fallback-available' : 'failed',
     webCodecs,
+    rawAccess,
     ffmpegWasm,
     fallbackReason,
   };

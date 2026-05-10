@@ -27,8 +27,14 @@ export function evaluateCapabilities(features: RuntimeFeatureSet): CapabilityRep
   if (!features.hasWebGPU) failures.push('WEBGPU_UNAVAILABLE');
   if (!features.hasWebCodecs) failures.push('WEBCODECS_UNAVAILABLE');
   if (!features.hevcSupported) failures.push('HEVC_UNSUPPORTED');
-  if (features.outputFormat != null && features.outputFormat !== 'I420P10') {
-    failures.push('I420P10_REQUIRED');
+  if (Object.hasOwn(features, 'outputFormat')) {
+    if (features.outputFormat !== 'I420P10') failures.push('I420P10_REQUIRED');
+  } else {
+    warnings.push('VideoFrame output format has not been observed yet.');
+  }
+
+  if (features.outputFormat === null) {
+    warnings.push('VideoFrame output is opaque; raw copyTo() planes are unavailable.');
   }
 
   if (features.colorSpace) {
@@ -39,8 +45,6 @@ export function evaluateCapabilities(features: RuntimeFeatureSet): CapabilityRep
   }
 
   if (features.rpuPresent === false) failures.push('RPU_REQUIRED');
-  if (features.outputFormat == null) warnings.push('VideoFrame output format has not been observed yet.');
-
   return {
     ok: failures.length === 0,
     failures,

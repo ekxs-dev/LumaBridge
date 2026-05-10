@@ -4,9 +4,19 @@ import type { Mp4VideoTrack } from '../../src/core/mp4';
 
 const ffmpegMock = vi.hoisted(() => ({
   execCalls: [] as string[][],
+  rawReadBytes: 1920 * 1080 * 3,
 }));
 
 vi.mock('../../src/core/webcodecs', () => ({
+  evaluateWebCodecsRawAccess: vi.fn((probe) => ({
+    mode: probe.format === 'I420P10' ? 'strict-i420p10' : 'known-non-strict-format',
+    canPreview: true,
+    canExposeRawPlanes: probe.format != null,
+    canCopyI420P10: probe.format === 'I420P10' && Boolean(probe.copyTo?.ok),
+    canCorrectDv: probe.format === 'I420P10' && Boolean(probe.copyTo?.ok),
+    label: probe.format === 'I420P10' ? 'strict I420P10 raw path' : `raw format ${probe.format}, not strict DV`,
+    reasons: [`format ${probe.format}`],
+  })),
   decodeFirstFrameFromMp4Track: vi.fn(async () => ({
     supported: true,
     codec: 'hev1.2.4.L153.B0',
@@ -56,7 +66,7 @@ vi.mock('@ffmpeg/ffmpeg', () => ({
       if (path.endsWith('.hevc')) {
         return new Uint8Array([0, 0, 0, 1, 0x7c, 0x01, 0xaa]);
       }
-      return new Uint8Array(1920 * 1080 * 3);
+      return new Uint8Array(ffmpegMock.rawReadBytes);
     }
     async deleteFile() {
       return true;
@@ -75,6 +85,7 @@ vi.mock('@ffmpeg/core/wasm?url', () => ({ default: '/mock/ffmpeg-core.wasm' }));
 describe('decoder adapter', () => {
   beforeEach(() => {
     ffmpegMock.execCalls.length = 0;
+    ffmpegMock.rawReadBytes = 1920 * 1080 * 3;
   });
 
   it('falls back to ffmpeg.wasm availability when WebCodecs cannot produce I420P10', async () => {
@@ -183,5 +194,61 @@ describe('decoder adapter', () => {
     expect(ffmpegMock.execCalls.at(-1)).toEqual(expect.arrayContaining(['-c:v', 'copy']));
     expect(ffmpegMock.execCalls.at(-1)).toEqual(expect.arrayContaining(['-bsf:v', 'hevc_mp4toannexb']));
     expect(ffmpegMock.execCalls.at(-1)).toEqual(expect.arrayContaining(['-f', 'hevc']));
+  });
+
+  it('decodes a short raw segment with one ffmpeg seek instead of seek-per-frame', async () => {
+    const { probeFfmpegRawSegment } = await import('../../src/core/decoder-adapter');
+    const track: Mp4VideoTrack = {
+      id: 1,
+      handlerType: 'vide',
+      timescale: 1000,
+      duration: 40_000,
+      width: 1920,
+      height: 1080,
+      codecType: 'hev1',
+      hevcConfig: {
+        configurationVersion: 1,
+        profileSpace: 0,
+        tierFlag: false,
+        profileIdc: 2,
+        profileCompatibilityFlags: 0,
+        constraintIndicatorFlags: 0,
+        levelIdc: 153,
+        lengthSize: 4,
+        codecString: 'hev1.2.4.L153.B0',
+        description: new Uint8Array([1]),
+      },
+      hasDolbyVisionConfig: true,
+      sampleCount: 1,
+      samples: [{
+        index: 0,
+        offset: 0,
+        size: 0,
+        dts: 0,
+        cts: 0,
+        duration: 40,
+        isSync: true,
+      }],
+    };
+    const frameBytes = 1920 * 1080 * 3;
+    ffmpegMock.rawReadBytes = frameBytes * 4;
+    const file = new File([new Uint8Array([1, 2, 3])], 'input.mkv', { type: 'video/matroska' });
+
+    const probe = await probeFfmpegRawSegment(file, track, {
+      seekSeconds: 12.5,
+      frameCount: 4,
+      outputFps: 2,
+    });
+
+    expect(probe.ok).toBe(true);
+    expect(probe.frameBytes).toBe(frameBytes);
+    expect(probe.frameCount).toBe(4);
+    expect(probe.bytes).toBe(frameBytes * 4);
+    expect(probe.outputFps).toBe(2);
+    const lastCall = ffmpegMock.execCalls.at(-1) ?? [];
+    expect(lastCall.filter((arg) => arg === '-ss')).toHaveLength(2);
+    expect(lastCall).toEqual(expect.arrayContaining(['-frames:v', '4']));
+    expect(lastCall).toEqual(expect.arrayContaining(['-vf', 'fps=2']));
+    expect(lastCall).toEqual(expect.arrayContaining(['-pix_fmt', 'yuv420p10le']));
   });
 });
