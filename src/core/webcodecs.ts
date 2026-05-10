@@ -33,6 +33,21 @@ export interface FrameCopyProbe {
   error: string | null;
 }
 
+export interface WebCodecsCanvasPreviewStats {
+  attempted: boolean;
+  ok: boolean;
+  codec: string | null;
+  decodedFrames: number;
+  drawnFrames: number;
+  elapsedMs: number;
+  averageDecodeMs: number | null;
+  effectiveFps: number;
+  lastTimestampUs: number | null;
+  format: string | null;
+  colorSpace: Record<string, unknown> | null;
+  error: string | null;
+}
+
 export function sampleTimestampUs(sample: Mp4Sample, timescale: number): number {
   return Math.round((sample.cts / timescale) * 1_000_000);
 }
@@ -104,6 +119,128 @@ export function createEncodedVideoChunk(fileBytes: Uint8Array, sample: Mp4Sample
 export const __webcodecsTestHooks = {
   uniqueCodecCandidates,
 };
+
+export async function renderWebCodecsCanvasPreview(
+  fileBytes: Uint8Array,
+  track: Mp4VideoTrack,
+  canvas: HTMLCanvasElement,
+  options: { maxFrames?: number; maxSeconds?: number } = {},
+): Promise<WebCodecsCanvasPreviewStats> {
+  const startedAt = performance.now();
+  const codec = track.hevcConfig?.codecString ?? null;
+  const base = (): WebCodecsCanvasPreviewStats => ({
+    attempted: true,
+    ok: false,
+    codec,
+    decodedFrames: 0,
+    drawnFrames: 0,
+    elapsedMs: performance.now() - startedAt,
+    averageDecodeMs: null,
+    effectiveFps: 0,
+    lastTimestampUs: null,
+    format: null,
+    colorSpace: null,
+    error: null,
+  });
+
+  if (typeof VideoDecoder === 'undefined' || typeof EncodedVideoChunk === 'undefined') {
+    return { ...base(), error: 'WebCodecs VideoDecoder is unavailable.' };
+  }
+  if (!track.hevcConfig) {
+    return { ...base(), error: 'Missing hvcC decoder description.' };
+  }
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return { ...base(), error: '2D canvas context is unavailable.' };
+
+  const config = buildVideoDecoderConfig(track);
+  let supportedConfig: VideoDecoderConfig | null = null;
+  try {
+    supportedConfig = await findSupportedVideoDecoderConfig(config);
+  } catch (error) {
+    return { ...base(), error: error instanceof Error ? error.message : String(error) };
+  }
+  if (!supportedConfig) {
+    return {
+      ...base(),
+      error: `VideoDecoder does not support any HEVC candidate: ${uniqueCodecCandidates(config.codec).join(', ')}.`,
+    };
+  }
+
+  const maxFrames = Math.max(1, Math.floor(options.maxFrames ?? 120));
+  const maxDurationUs = Math.max(1, (options.maxSeconds ?? 5) * 1_000_000);
+  let decodedFrames = 0;
+  let drawnFrames = 0;
+  let firstTimestampUs: number | null = null;
+  let lastTimestampUs: number | null = null;
+  let firstOutputAt: number | null = null;
+  let lastOutputAt: number | null = null;
+  let format: string | null = null;
+  let colorSpace: Record<string, unknown> | null = null;
+  let decoderError: string | null = null;
+  let stopDecoding = false;
+
+  const decoder = new VideoDecoder({
+    output: (frame) => {
+      decodedFrames += 1;
+      firstOutputAt ??= performance.now();
+      lastOutputAt = performance.now();
+      firstTimestampUs ??= frame.timestamp;
+      lastTimestampUs = frame.timestamp;
+      format ??= frame.format;
+      colorSpace ??= (frame.colorSpace?.toJSON?.() as Record<string, unknown> | undefined) ?? null;
+      if (drawnFrames === 0) {
+        canvas.width = frame.displayWidth || frame.codedWidth;
+        canvas.height = frame.displayHeight || frame.codedHeight;
+      }
+      ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
+      drawnFrames += 1;
+      if (
+        drawnFrames >= maxFrames
+        || (firstTimestampUs != null && frame.timestamp - firstTimestampUs >= maxDurationUs)
+      ) {
+        stopDecoding = true;
+      }
+      frame.close();
+    },
+    error: (error) => {
+      decoderError = error.message;
+    },
+  });
+
+  try {
+    decoder.configure(supportedConfig);
+    for (const sample of track.samples) {
+      if (stopDecoding) break;
+      decoder.decode(createEncodedVideoChunk(fileBytes, sample, track));
+      if (decoder.decodeQueueSize > 24) {
+        await new Promise((resolve) => window.setTimeout(resolve, 0));
+      }
+    }
+    await decoder.flush();
+  } catch (error) {
+    decoderError = error instanceof Error ? error.message : String(error);
+  } finally {
+    decoder.close();
+  }
+
+  const elapsedMs = performance.now() - startedAt;
+  const outputElapsedMs = firstOutputAt != null && lastOutputAt != null ? Math.max(1, lastOutputAt - firstOutputAt) : elapsedMs;
+  return {
+    attempted: true,
+    ok: drawnFrames > 0 && !decoderError,
+    codec: supportedConfig.codec,
+    decodedFrames,
+    drawnFrames,
+    elapsedMs,
+    averageDecodeMs: decodedFrames > 0 ? elapsedMs / decodedFrames : null,
+    effectiveFps: drawnFrames > 1 ? ((drawnFrames - 1) * 1000) / outputElapsedMs : 0,
+    lastTimestampUs,
+    format,
+    colorSpace,
+    error: decoderError,
+  };
+}
 
 export async function decodeFirstFrameFromMp4Track(
   fileBytes: Uint8Array,

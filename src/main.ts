@@ -25,7 +25,11 @@ import { inspectRpuAnnexBPacket, inspectRpuForSeconds, type RpuFrameSelection } 
 import { parseRpuMetadataForShader, type RpuMetadataProbe } from './core/rpu-metadata';
 import { renderI420P10SdrWithWebGpu, type WebGpuSdrRenderProbe } from './core/webgpu-render';
 import { uploadI420P10ToWebGpu, type WebGpuUploadProbe } from './core/webgpu-upload';
-import type { DecodedFrameProbe } from './core/webcodecs';
+import {
+  renderWebCodecsCanvasPreview,
+  type DecodedFrameProbe,
+  type WebCodecsCanvasPreviewStats,
+} from './core/webcodecs';
 import {
   clampRealtimeTargetFps,
   createRealtimePreviewReport,
@@ -147,6 +151,7 @@ function renderBench() {
       };
     },
     webCodecs: null as DecodedFrameProbe | null,
+    webCodecsCanvasPreview: null as WebCodecsCanvasPreviewStats | null,
     decoderAdapter: null as DecoderAdapterProbe | null,
     frameRpu: null as RpuFrameSelection | null,
     rpuMetadata: null as RpuMetadataProbe | null,
@@ -214,6 +219,7 @@ function renderBench() {
             <dt>fallback</dt><dd>not needed</dd>
           </dl>
           <button id="ffmpeg-raw-probe" class="secondary-button" type="button" disabled>Render selected SDR frame</button>
+          <button id="webcodecs-fast-preview" class="secondary-button" type="button" disabled>Fast WebCodecs preview</button>
           <h2 class="subhead">Frame/RPU alignment</h2>
           <dl class="debug-list compact" id="frame-rpu-meta">
             <dt>time</dt><dd>not selected</dd>
@@ -317,6 +323,7 @@ function renderBench() {
   const referenceMeta = document.querySelector<HTMLElement>('#reference-meta');
   const reportJson = document.querySelector<HTMLElement>('#report-json');
   const ffmpegRawProbe = document.querySelector<HTMLButtonElement>('#ffmpeg-raw-probe');
+  const webCodecsFastPreview = document.querySelector<HTMLButtonElement>('#webcodecs-fast-preview');
   const sdrPreviewCanvas = document.querySelector<HTMLCanvasElement>('#sdr-preview');
   const sdrPreviewMeta = document.querySelector<HTMLElement>('#sdr-preview-meta');
   const previewTimeRange = document.querySelector<HTMLInputElement>('#sdr-preview-time');
@@ -591,6 +598,7 @@ function renderBench() {
     if (previewTimeRange) previewTimeRange.disabled = manualDisabled;
     if (previewSecondsInput) previewSecondsInput.disabled = manualDisabled;
     if (ffmpegRawProbe) ffmpegRawProbe.disabled = manualDisabled;
+    if (webCodecsFastPreview) webCodecsFastPreview.disabled = manualDisabled || !activeParsedSource;
     if (realtimeToggle) realtimeToggle.disabled = !realtimeRunning && (baseDisabled || isRenderingRawPreview);
     if (realtimeFpsInput) realtimeFpsInput.disabled = baseDisabled || isRenderingRawPreview || realtimeRunning;
   };
@@ -1128,6 +1136,11 @@ function renderBench() {
         ? `${adapter.fallbackReason}; ffmpeg.wasm ${adapter.ffmpegWasm.available ? `available in ${adapter.ffmpegWasm.elapsedMs.toFixed(1)} ms${adapter.ffmpegWasm.rawFrame.attempted ? `; raw @ ${formatPreviewSeconds(adapter.ffmpegWasm.rawFrame.seekSeconds)} ${adapter.ffmpegWasm.rawFrame.ok ? 'ok' : `failed: ${adapter.ffmpegWasm.rawFrame.error}`}` : ''}` : `failed: ${adapter.ffmpegWasm.error ?? 'unknown error'}`}`
         : adapter.fallbackReason
       : 'not needed';
+    const fastPreview = report.webCodecsCanvasPreview
+      ? report.webCodecsCanvasPreview.ok
+        ? `fast preview ${report.webCodecsCanvasPreview.drawnFrames} frames, ${report.webCodecsCanvasPreview.effectiveFps.toFixed(1)} fps, ${report.webCodecsCanvasPreview.elapsedMs.toFixed(1)} ms`
+        : `fast preview failed: ${report.webCodecsCanvasPreview.error ?? 'unknown error'}`
+      : null;
     decodeMeta.innerHTML = `
       <dt>adapter</dt><dd>${adapter.selected ?? 'none'} (${adapter.status})</dd>
       <dt>support</dt><dd>${probe.supported ? 'supported' : 'not supported'}${probe.error ? `: ${probe.error}` : ''}</dd>
@@ -1136,6 +1149,7 @@ function renderBench() {
       <dt>color</dt><dd>${color}</dd>
       <dt>copyTo</dt><dd>${copyTo}</dd>
       <dt>fallback</dt><dd>${fallback}</dd>
+      ${fastPreview ? `<dt>fast path</dt><dd>${fastPreview}</dd>` : ''}
     `;
   };
 
@@ -1172,6 +1186,7 @@ function renderBench() {
     };
     report.mp4 = null;
     report.webCodecs = null;
+    report.webCodecsCanvasPreview = null;
     report.decoderAdapter = null;
     report.frameRpu = null;
     report.rpuMetadata = null;
@@ -1190,6 +1205,7 @@ function renderBench() {
     updateRealtimeMeta();
     setPreviewMode('raw-luma');
     if (ffmpegRawProbe) ffmpegRawProbe.textContent = 'Render selected SDR frame';
+    if (webCodecsFastPreview) webCodecsFastPreview.textContent = 'Fast WebCodecs preview';
     writePreviewSeconds(0, false);
     updatePreviewControlsMax();
     setPreviewControlsDisabled(true);
@@ -1304,6 +1320,40 @@ function renderBench() {
     const track = activeTrack;
     if (!file || !track) return;
     await runFfmpegRawPreview(file, track, selectionVersion, 'Manual ffmpeg.wasm raw-frame probe requested.');
+  });
+
+  webCodecsFastPreview?.addEventListener('click', async () => {
+    const parsed = activeParsedSource;
+    const track = activeTrack;
+    if (!parsed || !track?.hevcConfig || !sdrPreviewCanvas) return;
+    isRenderingRawPreview = true;
+    setPreviewControlsDisabled(true);
+    webCodecsFastPreview.textContent = 'Running fast preview...';
+    updateSdrPreviewStatus([
+      'WebCodecs fast preview running',
+      'Browser decoded VideoFrames are drawn directly to canvas',
+      'This is a speed/visibility path, not the strict raw DV SDR path',
+    ]);
+    updateReport();
+    try {
+      const stats = await renderWebCodecsCanvasPreview(parsed.bytes, track, sdrPreviewCanvas, {
+        maxFrames: 180,
+        maxSeconds: 6,
+      });
+      report.webCodecsCanvasPreview = stats;
+      updateDecodeMeta(report.decoderAdapter);
+      updateSdrPreviewStatus([
+        stats.ok ? 'WebCodecs fast preview complete' : 'WebCodecs fast preview failed',
+        `${stats.drawnFrames} drawn / ${stats.decodedFrames} decoded`,
+        `${stats.effectiveFps.toFixed(1)} fps, ${stats.elapsedMs.toFixed(1)} ms`,
+        stats.error ?? 'Browser opaque VideoFrame path; color may not match DV SDR reference',
+      ]);
+    } finally {
+      isRenderingRawPreview = false;
+      webCodecsFastPreview.textContent = 'Fast WebCodecs preview';
+      setPreviewControlsDisabled(false);
+      updateReport();
+    }
   });
 
   referenceFileInput?.addEventListener('change', async () => {
