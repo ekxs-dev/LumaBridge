@@ -16,6 +16,8 @@ describe('WGSL shader source', () => {
 
     expect(source).toContain('fn tone_map_bt2390_pq');
     expect(source).toContain('fn tone_map_bt2390_to_sdr');
+    expect(source).toContain('blackPower');
+    expect(source).toContain('gainInv');
     expect(source).not.toContain('tone_map_reinhard');
   });
 
@@ -23,6 +25,7 @@ describe('WGSL shader source', () => {
     const source = fs.readFileSync(shaderPath, 'utf8');
 
     expect(source).toContain('x/y: source min/max PQ, z/w: DV Level 1 max/avg PQ');
+    expect(source).toContain('let inputMinPq = max(doviParams.sourcePq.x, 0.0)');
     expect(source).toContain('select(doviParams.sourcePq.y, doviParams.sourcePq.z, doviParams.sourcePq.z > 0.0)');
   });
 

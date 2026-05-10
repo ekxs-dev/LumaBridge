@@ -275,12 +275,23 @@ fn reshape_component(component: u32, signal: f32, sig: vec3<f32>) -> f32 {
   return clamp(outSignal, lo, hi);
 }
 
-fn tone_map_bt2390_pq(code: f32, inputMaxPq: f32) -> f32 {
+fn tone_map_bt2390_pq(code: f32, inputMinPq: f32, inputMaxPq: f32, outputMinPq: f32) -> f32 {
   let outputMaxPq = pq_oetf(100.0);
-  let safeInputMax = max(inputMaxPq, outputMaxPq + 0.0001);
-  let maxLum = clamp(outputMaxPq / safeInputMax, 0.0, 1.0);
-  let kneeStart = 2.0 * maxLum - 1.0;
-  var x = clamp(code / safeInputMax, 0.0, 1.0);
+  let safeInputMin = clamp(inputMinPq, 0.0, max(inputMaxPq - 0.0001, 0.0));
+  let safeInputMax = max(inputMaxPq, max(outputMaxPq, safeInputMin + 0.0001));
+  let inputRange = max(0.000001, safeInputMax - safeInputMin);
+  let safeOutputMin = clamp(outputMinPq, 0.0, outputMaxPq);
+  let minLum = (safeOutputMin - safeInputMin) / inputRange;
+  let maxLum = clamp((outputMaxPq - safeInputMin) / inputRange, 0.000001, 1.0);
+  let kneeOffset = 1.0;
+  let kneeStart = (1.0 + kneeOffset) * maxLum - kneeOffset;
+  var blackPower = 4.0;
+  if (minLum > 0.0) {
+    blackPower = min(1.0 / minLum, 4.0);
+  }
+  let gainInv = 1.0 + (minLum / max(maxLum, 0.000001)) * pow(max(1.0 - maxLum, 0.0), blackPower);
+  let gain = select(1.0, 1.0 / max(gainInv, 0.000001), maxLum < 1.0);
+  var x = clamp((code - safeInputMin) / inputRange, 0.0, 1.0);
 
   if (kneeStart < 1.0 && x >= kneeStart) {
     let t = clamp((x - kneeStart) / (1.0 - kneeStart), 0.0, 1.0);
@@ -291,10 +302,15 @@ fn tone_map_bt2390_pq(code: f32, inputMaxPq: f32) -> f32 {
       + (-2.0 * t3 + 3.0 * t2) * maxLum;
   }
 
-  return clamp(x * safeInputMax, 0.0, outputMaxPq);
+  if (x < 1.0) {
+    x = x + minLum * pow(max(1.0 - x, 0.0), blackPower);
+    x = gain * (x - minLum) + minLum;
+  }
+
+  return clamp(x * inputRange + safeInputMin, safeOutputMin, outputMaxPq);
 }
 
-fn tone_map_bt2390_to_sdr(rgb2020Nits: vec3<f32>, inputMaxPq: f32) -> vec3<f32> {
+fn tone_map_bt2390_to_sdr(rgb2020Nits: vec3<f32>, inputMinPq: f32, inputMaxPq: f32) -> vec3<f32> {
   let targetNits = 100.0;
   let lmsNits = bt2020_rgb_to_ipt_lms(max(rgb2020Nits, vec3<f32>(0.0)));
   let lmsPq = vec3<f32>(
@@ -304,7 +320,7 @@ fn tone_map_bt2390_to_sdr(rgb2020Nits: vec3<f32>, inputMaxPq: f32) -> vec3<f32> 
   );
   let ipt = ipt_lms_to_ipt(lmsPq);
   let iOrig = max(ipt.x, 0.000001);
-  let mappedI = max(tone_map_bt2390_pq(ipt.x, inputMaxPq), 0.000001);
+  let mappedI = max(tone_map_bt2390_pq(ipt.x, inputMinPq, inputMaxPq, 0.0), 0.000001);
   let hullOrig = ((iOrig - 6.0) * iOrig + 9.0) * iOrig;
   let hullMapped = ((mappedI - 6.0) * mappedI + 9.0) * mappedI;
   let chromaScale = max(0.0, min(iOrig / mappedI, hullMapped / max(hullOrig, 0.000001)));
@@ -345,7 +361,7 @@ fn render_luma(y: f32) -> vec3<f32> {
 fn render_pq_sdr(y: f32, u: f32, v: f32) -> vec3<f32> {
   let rgb2020 = clamp(yuv2020_to_rgb(y, u, v), vec3<f32>(0.0), vec3<f32>(1.0));
   let nits = vec3<f32>(pq_eotf(rgb2020.r), pq_eotf(rgb2020.g), pq_eotf(rgb2020.b));
-  return tone_map_bt2390_to_sdr(nits, pq_oetf(1000.0));
+  return tone_map_bt2390_to_sdr(nits, 0.0, pq_oetf(1000.0));
 }
 
 fn render_dovi_p5_base(y: f32, u: f32, v: f32) -> vec3<f32> {
@@ -353,7 +369,7 @@ fn render_dovi_p5_base(y: f32, u: f32, v: f32) -> vec3<f32> {
   let lmsCode = clamp(dovi_ipt_to_lms(ipt), vec3<f32>(0.0), vec3<f32>(1.0));
   let lmsNits = vec3<f32>(pq_eotf(lmsCode.x), pq_eotf(lmsCode.y), pq_eotf(lmsCode.z));
   let rgb2020 = dovi_lms_to_bt2020(lmsNits);
-  return tone_map_bt2390_to_sdr(rgb2020, pq_oetf(1000.0));
+  return tone_map_bt2390_to_sdr(rgb2020, 0.0, pq_oetf(1000.0));
 }
 
 fn render_dovi_rpu(y: f32, u: f32, v: f32) -> vec3<f32> {
@@ -379,8 +395,9 @@ fn render_dovi_rpu(y: f32, u: f32, v: f32) -> vec3<f32> {
     lmsLinear
   );
   let rgb2020Nits = dovi_lms_to_bt2020(sourceRgbLinear);
+  let inputMinPq = max(doviParams.sourcePq.x, 0.0);
   let inputMaxPq = select(doviParams.sourcePq.y, doviParams.sourcePq.z, doviParams.sourcePq.z > 0.0);
-  return tone_map_bt2390_to_sdr(rgb2020Nits, inputMaxPq);
+  return tone_map_bt2390_to_sdr(rgb2020Nits, inputMinPq, inputMaxPq);
 }
 
 @compute @workgroup_size(8, 8)
