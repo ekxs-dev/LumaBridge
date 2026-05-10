@@ -69,6 +69,16 @@ fn pq_eotf(code: f32) -> f32 {
   return 10000.0 * pow(max(v - c1, 0.0) / (c2 - c3 * v), 1.0 / m1);
 }
 
+fn pq_oetf(nits: f32) -> f32 {
+  let m1 = 2610.0 / 16384.0;
+  let m2 = (2523.0 / 4096.0) * 128.0;
+  let c1 = 3424.0 / 4096.0;
+  let c2 = (2413.0 / 4096.0) * 32.0;
+  let c3 = (2392.0 / 4096.0) * 32.0;
+  let normalized = pow(max(nits / 10000.0, 0.0), m1);
+  return pow((c1 + c2 * normalized) / (1.0 + c3 * normalized), m2);
+}
+
 fn yuv2020_to_rgb(y: f32, u: f32, v: f32) -> vec3<f32> {
   let cb = u - 0.5;
   let cr = v - 0.5;
@@ -234,15 +244,25 @@ fn render_dovi_rpu(y: f32, u: f32, v: f32) -> vec3<f32> {
     doviParams.nonlinearMatrix2,
     nonlinearInput
   ), vec3<f32>(0.0), vec3<f32>(1.0));
-  let lmsNits = vec3<f32>(pq_eotf(lmsCode.x), pq_eotf(lmsCode.y), pq_eotf(lmsCode.z));
-  let lmsLinear = dovi_matrix3_mul(
+  let lmsLinear = vec3<f32>(pq_eotf(lmsCode.x), pq_eotf(lmsCode.y), pq_eotf(lmsCode.z));
+  let sourceRgbLinear = dovi_matrix3_mul(
     doviParams.linearMatrix0,
     doviParams.linearMatrix1,
     doviParams.linearMatrix2,
-    lmsNits
+    lmsLinear
   );
-  let rgb2020 = dovi_lms_to_bt2020(lmsLinear);
-  let sdr709 = tone_map_reinhard(max(bt2020_to_bt709(rgb2020), vec3<f32>(0.0)));
+  let rgb2020Linear = dovi_lms_to_bt2020(sourceRgbLinear);
+  let rgb2020Code = clamp(vec3<f32>(
+    pq_oetf(rgb2020Linear.x),
+    pq_oetf(rgb2020Linear.y),
+    pq_oetf(rgb2020Linear.z)
+  ), vec3<f32>(0.0), vec3<f32>(1.0));
+  let rgb2020Nits = vec3<f32>(
+    pq_eotf(rgb2020Code.x),
+    pq_eotf(rgb2020Code.y),
+    pq_eotf(rgb2020Code.z)
+  );
+  let sdr709 = tone_map_reinhard(max(bt2020_to_bt709(rgb2020Nits), vec3<f32>(0.0)));
   return srgb_encode(sdr709);
 }
 

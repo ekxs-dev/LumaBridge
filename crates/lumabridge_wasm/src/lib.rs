@@ -259,8 +259,14 @@ fn compact_metadata_from_dovi_rpu(rpu: &DoviRpu) -> Option<CompactDoviMetadata> 
         let pivot_count = curve.pivots.len().clamp(2, 9);
         metadata.reshape_header[component_index] = pivot_count as f32;
         let pivot_base = component_index * 12;
+        let mut cumulative_pivot = 0u32;
         for (pivot_index, pivot) in curve.pivots.iter().take(9).enumerate() {
-            metadata.pivots[pivot_base + pivot_index] = *pivot as f32 * pivot_scale;
+            cumulative_pivot = if pivot_index == 0 {
+                *pivot as u32
+            } else {
+                cumulative_pivot.saturating_add(*pivot as u32)
+            };
+            metadata.pivots[pivot_base + pivot_index] = cumulative_pivot as f32 * pivot_scale;
         }
 
         let piece_count = curve.pivots.len().saturating_sub(1).min(8);
@@ -335,9 +341,13 @@ fn compact_metadata_from_dovi_rpu(rpu: &DoviRpu) -> Option<CompactDoviMetadata> 
                                 .and_then(|coeffs| coeffs.get(coeff_index))
                                 .copied()
                                 .unwrap_or(0) as i64;
-                            metadata.mmr_coeffs[coeff_base + coeff_index] =
+                            write_mmr_coeff(
+                                &mut metadata.mmr_coeffs,
+                                coeff_base,
+                                coeff_index,
                                 ((int_part << header.coefficient_log2_denom) + frac_part) as f32
-                                    * coefficient_scale;
+                                    * coefficient_scale,
+                            );
                         }
                     }
                 }
@@ -396,6 +406,17 @@ pub fn pack_metadata(metadata: &CompactDoviMetadata) -> [f32; COMPACT_DOVI_FLOAT
         576,
     );
     packed
+}
+
+fn write_mmr_coeff(coeffs: &mut [f32], base: usize, coeff_index: usize, value: f32) {
+    let slot = if coeff_index < 3 {
+        coeff_index
+    } else {
+        coeff_index + 1
+    };
+    if base + slot < coeffs.len() {
+        coeffs[base + slot] = value;
+    }
 }
 
 #[cfg(feature = "wasm")]
@@ -505,6 +526,16 @@ mod tests {
     }
 
     #[test]
+    fn writes_mmr_coefficients_with_libplacebo_vec4_padding() {
+        let mut coeffs = vec![0.0; 8];
+        for coeff_index in 0..7 {
+            write_mmr_coeff(&mut coeffs, 0, coeff_index, (coeff_index + 1) as f32);
+        }
+
+        assert_eq!(coeffs, vec![1.0, 2.0, 3.0, 0.0, 4.0, 5.0, 6.0, 7.0]);
+    }
+
+    #[test]
     fn malformed_rpu_returns_error() {
         assert_eq!(
             parse_rpu_metadata(&[]).unwrap_err(),
@@ -531,6 +562,10 @@ mod tests {
             .pivots
             .iter()
             .any(|value| *value > 0.0 && *value < 1.0));
+        assert!(metadata.pivots[..9].windows(2).all(|pair| pair[0] <= pair[1]));
+        assert!((metadata.pivots[1] - 23.0 / 1023.0).abs() < 0.0001);
+        assert!((metadata.pivots[2] - 114.0 / 1023.0).abs() < 0.0001);
+        assert!((metadata.pivots[8] - 1021.0 / 1023.0).abs() < 0.0001);
         assert!((metadata.poly_coeffs[0] - 9133.0 / 8_388_608.0).abs() < 0.0001);
         assert!((metadata.poly_coeffs[1] - 17_647_044.0 / 8_388_608.0).abs() < 0.0001);
         assert!(metadata
