@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const shaderPath = path.resolve(__dirname, '../../src/gpu/dv-p5-to-sdr.wgsl');
+const externalShaderPath = path.resolve(__dirname, '../../src/gpu/external-video-to-sdr.wgsl');
 
 describe('WGSL shader source', () => {
   it('does not use known Chrome WGSL reserved identifiers as local names', () => {
@@ -69,5 +70,17 @@ describe('WGSL shader source', () => {
     expect(source).toContain('fn sample_u_linear');
     expect(source).toContain('AVCHROMA_LOC_LEFT');
     expect(source).toContain('let chromaCoord = vec2<f32>(sourceCoord.x * 0.5, (sourceCoord.y - 0.5) * 0.5)');
+  });
+
+  it('keeps the external texture preview shader on the WebGPU opaque-frame path', () => {
+    const source = fs.readFileSync(externalShaderPath, 'utf8');
+
+    expect(source).toContain('var videoTexture: texture_external');
+    expect(source).toContain('textureSampleBaseClampToEdge(videoTexture');
+    expect(source).toContain('fn approximate_sdr_from_browser_rgb');
+    for (const identifier of ['meta', 'target']) {
+      expect(source).not.toMatch(new RegExp(`\\b(?:let|var)\\s+${identifier}\\b`));
+      expect(source).not.toMatch(new RegExp(`\\b${identifier}\\s*:`));
+    }
   });
 });

@@ -138,6 +138,10 @@ video {
   margin-top: 18px;
 }
 
+.sdr-preview.is-hidden {
+  display: none;
+}
+
 .mode-toggle {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

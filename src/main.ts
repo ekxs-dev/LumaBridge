@@ -24,6 +24,10 @@ import {
 import { inspectRpuAnnexBPacket, inspectRpuForSeconds, type RpuFrameSelection } from './core/rpu-alignment';
 import { parseRpuMetadataForShader, type RpuMetadataProbe } from './core/rpu-metadata';
 import { renderI420P10SdrWithWebGpu, type WebGpuSdrRenderProbe } from './core/webgpu-render';
+import {
+  renderWebCodecsExternalTexturePreview,
+  type WebGpuExternalPreviewStats,
+} from './core/webgpu-external-preview';
 import { uploadI420P10ToWebGpu, type WebGpuUploadProbe } from './core/webgpu-upload';
 import {
   renderWebCodecsCanvasPreview,
@@ -152,6 +156,7 @@ function renderBench() {
     },
     webCodecs: null as DecodedFrameProbe | null,
     webCodecsCanvasPreview: null as WebCodecsCanvasPreviewStats | null,
+    webCodecsExternalPreview: null as WebGpuExternalPreviewStats | null,
     decoderAdapter: null as DecoderAdapterProbe | null,
     frameRpu: null as RpuFrameSelection | null,
     rpuMetadata: null as RpuMetadataProbe | null,
@@ -220,6 +225,7 @@ function renderBench() {
           </dl>
           <button id="ffmpeg-raw-probe" class="secondary-button" type="button" disabled>Render selected SDR frame</button>
           <button id="webcodecs-fast-preview" class="secondary-button" type="button" disabled>Fast WebCodecs preview</button>
+          <button id="webgpu-external-preview-button" class="secondary-button" type="button" disabled>Fast WebGPU SDR preview</button>
           <h2 class="subhead">Frame/RPU alignment</h2>
           <dl class="debug-list compact" id="frame-rpu-meta">
             <dt>time</dt><dd>not selected</dd>
@@ -257,6 +263,7 @@ function renderBench() {
             <span>Benchmark timings remain synthetic until decode pipeline is connected</span>
           </div>
           <canvas id="sdr-preview" class="sdr-preview" width="960" height="402" aria-label="SDR debug preview"></canvas>
+          <canvas id="external-preview" class="sdr-preview external-preview is-hidden" width="960" height="402" aria-label="Fast WebGPU external texture preview"></canvas>
           <div class="mode-toggle" role="group" aria-label="Preview mode">
             <button class="mode-button active" type="button" data-preview-mode="raw-luma">Raw luma</button>
             <button class="mode-button" type="button" data-preview-mode="dv-p5-base">DV P5 base</button>
@@ -324,7 +331,9 @@ function renderBench() {
   const reportJson = document.querySelector<HTMLElement>('#report-json');
   const ffmpegRawProbe = document.querySelector<HTMLButtonElement>('#ffmpeg-raw-probe');
   const webCodecsFastPreview = document.querySelector<HTMLButtonElement>('#webcodecs-fast-preview');
+  const webGpuExternalPreviewButton = document.querySelector<HTMLButtonElement>('#webgpu-external-preview-button');
   const sdrPreviewCanvas = document.querySelector<HTMLCanvasElement>('#sdr-preview');
+  const externalPreviewCanvas = document.querySelector<HTMLCanvasElement>('#external-preview');
   const sdrPreviewMeta = document.querySelector<HTMLElement>('#sdr-preview-meta');
   const previewTimeRange = document.querySelector<HTMLInputElement>('#sdr-preview-time');
   const previewSecondsInput = document.querySelector<HTMLInputElement>('#sdr-preview-seconds');
@@ -599,6 +608,7 @@ function renderBench() {
     if (previewSecondsInput) previewSecondsInput.disabled = manualDisabled;
     if (ffmpegRawProbe) ffmpegRawProbe.disabled = manualDisabled;
     if (webCodecsFastPreview) webCodecsFastPreview.disabled = manualDisabled || !activeParsedSource;
+    if (webGpuExternalPreviewButton) webGpuExternalPreviewButton.disabled = manualDisabled || !activeParsedSource;
     if (realtimeToggle) realtimeToggle.disabled = !realtimeRunning && (baseDisabled || isRenderingRawPreview);
     if (realtimeFpsInput) realtimeFpsInput.disabled = baseDisabled || isRenderingRawPreview || realtimeRunning;
   };
@@ -672,8 +682,14 @@ function renderBench() {
     return 0;
   };
 
+  const showPreviewCanvas = (kind: 'sdr' | 'external') => {
+    sdrPreviewCanvas?.classList.toggle('is-hidden', kind !== 'sdr');
+    externalPreviewCanvas?.classList.toggle('is-hidden', kind !== 'external');
+  };
+
   const clearSdrPreview = () => {
     if (!sdrPreviewCanvas) return;
+    showPreviewCanvas('sdr');
     lastSdrPreview = null;
     report.referenceCompare = null;
     report.referenceDiagnosis = null;
@@ -704,6 +720,7 @@ function renderBench() {
     renderer: 'cpu' | 'webgpu' = 'cpu',
   ) => {
     if (!sdrPreviewCanvas) return;
+    showPreviewCanvas('sdr');
     lastSdrPreview = preview;
     if (sdrPreviewCanvas.width !== preview.width) sdrPreviewCanvas.width = preview.width;
     if (sdrPreviewCanvas.height !== preview.height) sdrPreviewCanvas.height = preview.height;
@@ -1141,6 +1158,11 @@ function renderBench() {
         ? `fast preview ${report.webCodecsCanvasPreview.drawnFrames} frames, ${report.webCodecsCanvasPreview.effectiveFps.toFixed(1)} fps, ${report.webCodecsCanvasPreview.elapsedMs.toFixed(1)} ms`
         : `fast preview failed: ${report.webCodecsCanvasPreview.error ?? 'unknown error'}`
       : null;
+    const externalPreview = report.webCodecsExternalPreview
+      ? report.webCodecsExternalPreview.ok
+        ? `external WebGPU ${report.webCodecsExternalPreview.drawnFrames} frames, ${report.webCodecsExternalPreview.effectiveFps.toFixed(1)} fps, ${report.webCodecsExternalPreview.elapsedMs.toFixed(1)} ms`
+        : `external WebGPU failed: ${report.webCodecsExternalPreview.error ?? 'unknown error'}`
+      : null;
     decodeMeta.innerHTML = `
       <dt>adapter</dt><dd>${adapter.selected ?? 'none'} (${adapter.status})</dd>
       <dt>support</dt><dd>${probe.supported ? 'supported' : 'not supported'}${probe.error ? `: ${probe.error}` : ''}</dd>
@@ -1150,6 +1172,7 @@ function renderBench() {
       <dt>copyTo</dt><dd>${copyTo}</dd>
       <dt>fallback</dt><dd>${fallback}</dd>
       ${fastPreview ? `<dt>fast path</dt><dd>${fastPreview}</dd>` : ''}
+      ${externalPreview ? `<dt>external path</dt><dd>${externalPreview}</dd>` : ''}
     `;
   };
 
@@ -1187,6 +1210,7 @@ function renderBench() {
     report.mp4 = null;
     report.webCodecs = null;
     report.webCodecsCanvasPreview = null;
+    report.webCodecsExternalPreview = null;
     report.decoderAdapter = null;
     report.frameRpu = null;
     report.rpuMetadata = null;
@@ -1206,6 +1230,7 @@ function renderBench() {
     setPreviewMode('raw-luma');
     if (ffmpegRawProbe) ffmpegRawProbe.textContent = 'Render selected SDR frame';
     if (webCodecsFastPreview) webCodecsFastPreview.textContent = 'Fast WebCodecs preview';
+    if (webGpuExternalPreviewButton) webGpuExternalPreviewButton.textContent = 'Fast WebGPU SDR preview';
     writePreviewSeconds(0, false);
     updatePreviewControlsMax();
     setPreviewControlsDisabled(true);
@@ -1351,6 +1376,45 @@ function renderBench() {
     } finally {
       isRenderingRawPreview = false;
       webCodecsFastPreview.textContent = 'Fast WebCodecs preview';
+      setPreviewControlsDisabled(false);
+      updateReport();
+    }
+  });
+
+  webGpuExternalPreviewButton?.addEventListener('click', async () => {
+    const parsed = activeParsedSource;
+    const track = activeTrack;
+    if (!parsed || !track?.hevcConfig || !externalPreviewCanvas) return;
+    isRenderingRawPreview = true;
+    setPreviewControlsDisabled(true);
+    showPreviewCanvas('external');
+    webGpuExternalPreviewButton.textContent = 'Running WebGPU preview...';
+    lastSdrPreview = null;
+    report.referenceCompare = null;
+    report.referenceDiagnosis = null;
+    updateReferenceMeta('External texture preview has no CPU readback yet; reference comparison is unavailable.');
+    updateSdrPreviewStatus([
+      'Fast WebGPU SDR preview running',
+      'WebCodecs VideoFrames are imported as WebGPU external textures',
+      'Opaque browser RGB is tone-shaped for interaction; this is not libplacebo/reference color',
+    ]);
+    updateReport();
+    try {
+      const stats = await renderWebCodecsExternalTexturePreview(parsed.bytes, track, externalPreviewCanvas, {
+        maxFrames: 180,
+        maxSeconds: 6,
+      });
+      report.webCodecsExternalPreview = stats;
+      updateDecodeMeta(report.decoderAdapter);
+      updateSdrPreviewStatus([
+        stats.ok ? 'Fast WebGPU SDR preview complete' : 'Fast WebGPU SDR preview failed',
+        `${stats.drawnFrames} drawn / ${stats.decodedFrames} decoded`,
+        `${stats.effectiveFps.toFixed(1)} fps, ${stats.elapsedMs.toFixed(1)} ms`,
+        stats.error ?? 'External texture path is fast but starts from browser-converted opaque RGB',
+      ]);
+    } finally {
+      isRenderingRawPreview = false;
+      webGpuExternalPreviewButton.textContent = 'Fast WebGPU SDR preview';
       setPreviewControlsDisabled(false);
       updateReport();
     }

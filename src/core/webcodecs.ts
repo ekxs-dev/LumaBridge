@@ -71,7 +71,7 @@ export function buildVideoDecoderConfig(track: Mp4VideoTrack): VideoDecoderConfi
   };
 }
 
-function uniqueCodecCandidates(codec: string): string[] {
+export function uniqueCodecCandidates(codec: string): string[] {
   const candidates = [codec];
   const relaxedConstraint = codec.replace(/\.B[0-9A-Fa-f]+$/, '.B0');
   candidates.push(relaxedConstraint);
@@ -87,7 +87,7 @@ function uniqueCodecCandidates(codec: string): string[] {
   return [...new Set(candidates)];
 }
 
-async function findSupportedVideoDecoderConfig(config: VideoDecoderConfig): Promise<VideoDecoderConfig | null> {
+export async function findSupportedVideoDecoderConfig(config: VideoDecoderConfig): Promise<VideoDecoderConfig | null> {
   const codecs = uniqueCodecCandidates(config.codec);
   for (const codec of codecs) {
     const candidate = { ...config, codec };
