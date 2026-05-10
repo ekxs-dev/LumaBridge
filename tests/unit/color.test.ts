@@ -49,6 +49,7 @@ describe('color math references', () => {
   it('evaluates polynomial and MMR reshape references', () => {
     expect(reshapePolynomial(0.5, [0.1, 0.8, 0.2])).toBeCloseTo(0.55);
     expect(reshapeMmr([0.2, 0.3, 0.4], 0.1, [1, 1, 1, 0, 0, 0, 0])).toBeCloseTo(1.0);
+    expect(reshapeMmr([0.2, 0.3, 0.4], 0, [0, 0, 0, 0, 1, 0, 0])).toBeCloseTo(0.08);
   });
 
   it('keeps fixed tone mapping deterministic', () => {

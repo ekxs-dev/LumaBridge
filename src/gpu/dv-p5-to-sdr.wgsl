@@ -149,7 +149,7 @@ fn reshape_component(component: u32, signal: f32, sig: vec3<f32>) -> f32 {
     outSignal = dovi_poly(signal, poly_coeffs(component, pieceIndex).xyz);
   } else {
     let order = max(1u, min(3u, u32(round(meta.w))));
-    let sigX = vec4<f32>(sig.x * sig.x, sig.x * sig.y, sig.y * sig.z, sig.x * sig.y * sig.z);
+    let sigX = vec4<f32>(sig.x * sig.y, sig.x * sig.z, sig.y * sig.z, sig.x * sig.y * sig.z);
     outSignal = meta.y;
     let mmr0a = mmr_coeffs(component, pieceIndex, 0u, 0u);
     let mmr0b = mmr_coeffs(component, pieceIndex, 0u, 1u);

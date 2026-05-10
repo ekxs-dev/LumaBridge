@@ -86,7 +86,7 @@ npm run test:rust
 - `src/core/webgpu-render.ts` runs the WGSL compute shader against the ffmpeg.wasm raw frame and reads back an RGBA8 SDR debug preview when WebGPU is available. It now accepts packed RPU metadata, but the WGSL reshape math is still simplified/debug quality.
 - Rust `parse_rpu_metadata` now uses the MIT `dolby_vision` crate to parse real HEVC type-62 RPU payloads and fill compact metadata with Dolby matrices, offsets, source PQ, pivots, and polynomial/MMR coefficient slots. It is still pending final libplacebo parity for pivot interpretation, per-piece method/order packing, and shader application.
 - The browser WASM package is built with rustup stable + `wasm32-unknown-unknown` and `wasm-bindgen-cli` 0.2.121 via `npm run build:wasm`.
-- WGSL currently contains a debug compute path and simplified preview modes. It now applies ABI v2 RPU reshape metadata for diagnostics, but the result is not yet libplacebo/reference validated.
+- WGSL currently contains a debug compute path and simplified preview modes. It now applies ABI v2 RPU reshape metadata for diagnostics, and the MMR basis terms match libplacebo's `x*y`, `x*z`, `y*z`, `x*y*z` layout. The result is not yet full libplacebo/reference validated.
 
 ## PR / Commit Guidance
 - Suggested title format: `[lumabridge] <Title>`.
@@ -122,6 +122,7 @@ npm run test:rust
 - [x] Add deterministic I420P10 plane upload planning for WebGPU storage buffers.
 - [x] Wire ffmpeg.wasm raw-frame output to a live WebGPU buffer upload probe on `/bench`.
 - [x] Add WebGPU compute shader SDR debug render/readback for raw I420P10 preview frames.
+- [x] Align WGSL MMR reshape cross terms with libplacebo's coefficient basis.
 - [ ] Implement and validate libplacebo-aligned DV polynomial/MMR reshape in WGSL.
 - [ ] Add real SDR frame readback and pixel-error comparison against `sdr_reference.png`.
 - [ ] Replace synthetic benchmark timings with measured demux/decode/copy/upload/shader/present timings.
