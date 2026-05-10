@@ -1396,20 +1396,21 @@ function renderBench() {
     updateSdrPreviewStatus([
       'Fast WebGPU SDR preview running',
       'WebCodecs VideoFrames are imported as WebGPU external textures',
-      'Opaque browser RGB is tone-shaped for interaction; this is not libplacebo/reference color',
+      'Playing at frame timestamps; approximate color, not libplacebo/reference SDR',
     ]);
     updateReport();
     try {
       const stats = await renderWebCodecsExternalTexturePreview(parsed.bytes, track, externalPreviewCanvas, {
-        maxFrames: 180,
-        maxSeconds: 6,
+        maxFrames: 720,
+        maxSeconds: 30,
+        realtime: true,
       });
       report.webCodecsExternalPreview = stats;
       updateDecodeMeta(report.decoderAdapter);
       updateSdrPreviewStatus([
         stats.ok ? 'Fast WebGPU SDR preview complete' : 'Fast WebGPU SDR preview failed',
         `${stats.drawnFrames} drawn / ${stats.decodedFrames} decoded`,
-        `${stats.effectiveFps.toFixed(1)} fps, ${stats.elapsedMs.toFixed(1)} ms`,
+        `${stats.presentationMode} ${stats.effectiveFps.toFixed(1)} fps, ${stats.elapsedMs.toFixed(1)} ms`,
         stats.error ?? 'External texture path is fast but starts from browser-converted opaque RGB',
       ]);
     } finally {

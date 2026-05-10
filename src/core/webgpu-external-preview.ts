@@ -22,6 +22,7 @@ export interface WebGpuExternalPreviewStats {
   colorSpace: Record<string, unknown> | null;
   width: number | null;
   height: number | null;
+  presentationMode: 'realtime' | 'fast';
   error: string | null;
 }
 
@@ -96,15 +97,20 @@ function baseStats(startedAt: number, codec: string | null): WebGpuExternalPrevi
     colorSpace: null,
     width: null,
     height: null,
+    presentationMode: 'realtime',
     error: null,
   };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 export async function renderWebCodecsExternalTexturePreview(
   fileBytes: Uint8Array,
   track: Mp4VideoTrack,
   canvas: HTMLCanvasElement,
-  options: { maxFrames?: number; maxSeconds?: number } = {},
+  options: { maxFrames?: number; maxSeconds?: number; realtime?: boolean } = {},
 ): Promise<WebGpuExternalPreviewStats> {
   const startedAt = performance.now();
   const codec = track.hevcConfig?.codecString ?? null;
@@ -157,20 +163,25 @@ export async function renderWebCodecsExternalTexturePreview(
     });
     const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
 
-    const maxFrames = Math.max(1, Math.floor(options.maxFrames ?? 180));
-    const maxDurationUs = Math.max(1, (options.maxSeconds ?? 6) * 1_000_000);
+    const realtime = options.realtime ?? true;
+    const maxFrames = Math.max(1, Math.floor(options.maxFrames ?? 720));
+    const maxDurationUs = Math.max(1, (options.maxSeconds ?? 30) * 1_000_000);
     let decodedFrames = 0;
     let drawnFrames = 0;
     let firstTimestampUs: number | null = null;
     let lastTimestampUs: number | null = null;
     let firstOutputAt: number | null = null;
     let lastOutputAt: number | null = null;
+    let firstPresentationAt: number | null = null;
+    let lastPresentationAt: number | null = null;
     let formatLabel: string | null = null;
     let colorSpace: Record<string, unknown> | null = null;
     let width: number | null = null;
     let height: number | null = null;
     let decoderError: string | null = null;
     let stopDecoding = false;
+    let pendingPresentation = Promise.resolve();
+    let queuedFrames = 0;
 
     const drawFrame = (frame: VideoFrame) => {
       if (drawnFrames === 0) {
@@ -205,27 +216,43 @@ export async function renderWebCodecsExternalTexturePreview(
       drawnFrames += 1;
     };
 
+    const presentFrame = async (frame: VideoFrame) => {
+      firstPresentationAt ??= performance.now();
+      if (realtime && firstTimestampUs != null) {
+        const relativeMs = Math.max(0, (frame.timestamp - firstTimestampUs) / 1000);
+        const dueAt = firstPresentationAt + relativeMs;
+        const delayMs = dueAt - performance.now();
+        if (delayMs > 1) await sleep(delayMs);
+      }
+
+      try {
+        drawFrame(frame);
+        lastPresentationAt = performance.now();
+      } catch (error) {
+        decoderError = error instanceof Error ? error.message : String(error);
+        stopDecoding = true;
+      } finally {
+        frame.close();
+        queuedFrames = Math.max(0, queuedFrames - 1);
+      }
+    };
+
     const decoder = new VideoDecoder({
       output: (frame) => {
         decodedFrames += 1;
-        firstOutputAt ??= performance.now();
-        lastOutputAt = performance.now();
+        const outputAt = performance.now();
+        firstOutputAt ??= outputAt;
+        lastOutputAt = outputAt;
         firstTimestampUs ??= frame.timestamp;
         lastTimestampUs = frame.timestamp;
         formatLabel ??= frame.format;
         colorSpace ??= (frame.colorSpace?.toJSON?.() as Record<string, unknown> | undefined) ?? null;
 
-        try {
-          drawFrame(frame);
-        } catch (error) {
-          decoderError = error instanceof Error ? error.message : String(error);
-          stopDecoding = true;
-        } finally {
-          frame.close();
-        }
+        queuedFrames += 1;
+        pendingPresentation = pendingPresentation.then(() => presentFrame(frame));
 
         if (
-          drawnFrames >= maxFrames
+          decodedFrames >= maxFrames
           || (firstTimestampUs != null && frame.timestamp - firstTimestampUs >= maxDurationUs)
         ) {
           stopDecoding = true;
@@ -241,11 +268,12 @@ export async function renderWebCodecsExternalTexturePreview(
       for (const sample of track.samples) {
         if (stopDecoding) break;
         decoder.decode(createEncodedVideoChunk(fileBytes, sample, track));
-        if (decoder.decodeQueueSize > 16) {
-          await new Promise((resolve) => window.setTimeout(resolve, 0));
+        while (!stopDecoding && (decoder.decodeQueueSize > 16 || queuedFrames > 4)) {
+          await sleep(4);
         }
       }
       await decoder.flush();
+      await pendingPresentation;
       await device.queue.onSubmittedWorkDone();
     } catch (error) {
       decoderError = error instanceof Error ? error.message : String(error);
@@ -254,8 +282,10 @@ export async function renderWebCodecsExternalTexturePreview(
     }
 
     const elapsedMs = performance.now() - startedAt;
-    const outputElapsedMs = firstOutputAt != null && lastOutputAt != null
-      ? Math.max(1, lastOutputAt - firstOutputAt)
+    const outputElapsedMs = firstPresentationAt != null && lastPresentationAt != null
+      ? Math.max(1, lastPresentationAt - firstPresentationAt)
+      : firstOutputAt != null && lastOutputAt != null
+        ? Math.max(1, lastOutputAt - firstOutputAt)
       : elapsedMs;
     return {
       attempted: true,
@@ -271,6 +301,7 @@ export async function renderWebCodecsExternalTexturePreview(
       colorSpace,
       width,
       height,
+      presentationMode: realtime ? 'realtime' : 'fast',
       error: decoderError,
     };
   } catch (error) {
