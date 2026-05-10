@@ -87,9 +87,10 @@ npm run test:rust
 - `/bench` keeps the previous preview visible while a selected raw frame is being decoded/rendered and only draws the CPU preview as fallback, avoiding a CPU-to-WebGPU color flash during successful RPU renders.
 - `/bench` can manually load a libplacebo PNG reference and compare the current SDR preview readback against it. The report records RGB MAE, per-channel MAE, signed RGB bias, output/reference averages, max-error pixel, outlier count, and a reference-gap diagnosis with likely causes/next checks; this is a manual diagnostic, not the final automated fixture parity gate yet.
 - `/bench` avoids resetting the SDR canvas dimensions when the preview size is unchanged. This keeps the previous preview visible during re-renders and prevents the one-frame blank/flash seen while ffmpeg.wasm/WebGPU work is still in flight.
+- `tests/unit/rpu-metadata.test.ts` now checks compact RPU metadata against FFmpeg Dolby Vision side-data fields for the first fixture frame: matrices, offsets, source PQ, pivots, and polynomial coefficients. If that test is green, the largest libplacebo gap is more likely in WGSL sampling/reshape/tone/gamut mapping or frame/RPU alignment than in Rust metadata packing.
 - Rust `parse_rpu_metadata` now uses the MIT `dolby_vision` crate to parse real HEVC type-62 RPU payloads and fill compact metadata with Dolby matrices, offsets, source PQ, DV Level 1 max/avg PQ, pivots, and polynomial/MMR coefficient slots. It also retries ffmpeg single-packet RPU payloads with CRC-validated tail trimming because Annex-B copy probes can leave non-RPU bytes after the real RPU terminator. It is still pending final libplacebo parity for pivot interpretation, per-piece method/order packing, and shader application.
 - The browser WASM package is built with rustup stable + `wasm32-unknown-unknown` and `wasm-bindgen-cli` 0.2.121 via `npm run build:wasm`.
-- WGSL currently contains a debug compute path and simplified preview modes. It now applies ABI v2 RPU reshape metadata for diagnostics, the MMR basis terms and coefficient padding match libplacebo's `x*y`, `x*z`, `y*z`, `x*y*z` layout, the DV decode offset follows libplacebo's full-range `1024/1023` normalization, the DV post step avoids an extra PQ OETF/EOTF round trip, and the SDR diagnostic tone map uses a BT.2390-style IPT/PQ path using DV Level 1 max PQ when present instead of the old Reinhard path. The result is not yet full libplacebo/reference validated.
+- WGSL currently contains a debug compute path and simplified preview modes. It now applies ABI v2 RPU reshape metadata for diagnostics, the MMR basis terms and coefficient padding match libplacebo's `x*y`, `x*z`, `y*z`, `x*y*z` layout, the DV decode offset follows libplacebo's full-range `1024/1023` normalization, the DV post step avoids an extra PQ OETF/EOTF round trip, and the SDR diagnostic tone map uses a BT.2390-style IPT/PQ path using DV Level 1 max PQ when present instead of the old Reinhard path. The raw WebGPU preview samples luma/chroma bilinearly and assumes the current fixtures' `AVCHROMA_LOC_LEFT` 4:2:0 chroma siting. The result is not yet full libplacebo/reference validated.
 - Chrome currently rejects `meta` as a WGSL local identifier. Keep shader locals away from reserved keywords; `tests/unit/wgsl.test.ts` guards the regression that broke `/bench` WebGPU rendering.
 
 ## PR / Commit Guidance
@@ -140,6 +141,8 @@ npm run test:rust
 - [x] Add reference-gap diagnosis to explain likely libplacebo mismatch causes from MAE/bias/pipeline context.
 - [x] Use hybrid ffmpeg.wasm seek for selected raw-frame and HEVC packet probes.
 - [x] Replace diagnostic Reinhard tone mapping with a BT.2390-style IPT/PQ SDR path.
+- [x] Add FFmpeg-side-data golden coverage for compact RPU metadata fields.
+- [x] Use bilinear WGSL luma/chroma sampling with left chroma siting for current fixtures.
 - [ ] Implement and validate libplacebo-aligned DV polynomial/MMR reshape in WGSL.
 - [ ] Add real SDR frame readback and pixel-error comparison against `sdr_reference.png`.
 - [ ] Replace synthetic benchmark timings with measured demux/decode/copy/upload/shader/present timings.

@@ -32,4 +32,13 @@ describe('WGSL shader source', () => {
     expect(source).toContain('let doviOffsetScale = 1024.0 / 1023.0');
     expect(source).toContain('doviParams.nonlinearOffset.xyz * vec3<f32>(doviOffsetScale)');
   });
+
+  it('uses bilinear luma/chroma sampling with left chroma siting', () => {
+    const source = fs.readFileSync(shaderPath, 'utf8');
+
+    expect(source).toContain('fn sample_y_linear');
+    expect(source).toContain('fn sample_u_linear');
+    expect(source).toContain('AVCHROMA_LOC_LEFT');
+    expect(source).toContain('let chromaCoord = vec2<f32>(sourceCoord.x * 0.5, (sourceCoord.y - 0.5) * 0.5)');
+  });
 });

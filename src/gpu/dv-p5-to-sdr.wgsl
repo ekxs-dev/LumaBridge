@@ -46,6 +46,18 @@ fn sample_v10(index: u32) -> f32 {
   return f32(vPlane[index] & 0x03ffu);
 }
 
+fn sample_y10_xy(x: u32, y: u32) -> f32 {
+  return sample_y10(y * frameParams.yStride + x);
+}
+
+fn sample_u10_xy(x: u32, y: u32) -> f32 {
+  return sample_u10(y * frameParams.uvStride + x);
+}
+
+fn sample_v10_xy(x: u32, y: u32) -> f32 {
+  return sample_v10(y * frameParams.uvStride + x);
+}
+
 fn normalize_y(sample: f32) -> f32 {
   if (frameParams.range == 0u) {
     return sample / 1023.0;
@@ -58,6 +70,58 @@ fn normalize_uv(sample: f32) -> f32 {
     return sample / 1023.0;
   }
   return clamp((sample - 64.0) / (960.0 - 64.0), 0.0, 1.0);
+}
+
+fn sample_y_linear(coord: vec2<f32>) -> f32 {
+  let maxX = frameParams.sourceWidth - 1u;
+  let maxY = frameParams.sourceHeight - 1u;
+  let x = clamp(coord.x, 0.0, f32(maxX));
+  let y = clamp(coord.y, 0.0, f32(maxY));
+  let x0 = u32(floor(x));
+  let y0 = u32(floor(y));
+  let x1 = min(maxX, x0 + 1u);
+  let y1 = min(maxY, y0 + 1u);
+  let fx = fract(x);
+  let fy = fract(y);
+  let top = mix(normalize_y(sample_y10_xy(x0, y0)), normalize_y(sample_y10_xy(x1, y0)), fx);
+  let bottom = mix(normalize_y(sample_y10_xy(x0, y1)), normalize_y(sample_y10_xy(x1, y1)), fx);
+  return mix(top, bottom, fy);
+}
+
+fn sample_u_linear(coord: vec2<f32>) -> f32 {
+  let chromaWidth = (frameParams.sourceWidth + 1u) / 2u;
+  let chromaHeight = (frameParams.sourceHeight + 1u) / 2u;
+  let maxX = chromaWidth - 1u;
+  let maxY = chromaHeight - 1u;
+  let x = clamp(coord.x, 0.0, f32(maxX));
+  let y = clamp(coord.y, 0.0, f32(maxY));
+  let x0 = u32(floor(x));
+  let y0 = u32(floor(y));
+  let x1 = min(maxX, x0 + 1u);
+  let y1 = min(maxY, y0 + 1u);
+  let fx = fract(x);
+  let fy = fract(y);
+  let top = mix(normalize_uv(sample_u10_xy(x0, y0)), normalize_uv(sample_u10_xy(x1, y0)), fx);
+  let bottom = mix(normalize_uv(sample_u10_xy(x0, y1)), normalize_uv(sample_u10_xy(x1, y1)), fx);
+  return mix(top, bottom, fy);
+}
+
+fn sample_v_linear(coord: vec2<f32>) -> f32 {
+  let chromaWidth = (frameParams.sourceWidth + 1u) / 2u;
+  let chromaHeight = (frameParams.sourceHeight + 1u) / 2u;
+  let maxX = chromaWidth - 1u;
+  let maxY = chromaHeight - 1u;
+  let x = clamp(coord.x, 0.0, f32(maxX));
+  let y = clamp(coord.y, 0.0, f32(maxY));
+  let x0 = u32(floor(x));
+  let y0 = u32(floor(y));
+  let x1 = min(maxX, x0 + 1u);
+  let y1 = min(maxY, y0 + 1u);
+  let fx = fract(x);
+  let fy = fract(y);
+  let top = mix(normalize_uv(sample_v10_xy(x0, y0)), normalize_uv(sample_v10_xy(x1, y0)), fx);
+  let bottom = mix(normalize_uv(sample_v10_xy(x0, y1)), normalize_uv(sample_v10_xy(x1, y1)), fx);
+  return mix(top, bottom, fy);
 }
 
 fn pq_eotf(code: f32) -> f32 {
@@ -325,13 +389,16 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     return;
   }
 
-  let sourceX = min(frameParams.sourceWidth - 1u, u32(floor((f32(id.x) + 0.5) * f32(frameParams.sourceWidth) / f32(frameParams.outputWidth))));
-  let sourceY = min(frameParams.sourceHeight - 1u, u32(floor((f32(id.y) + 0.5) * f32(frameParams.sourceHeight) / f32(frameParams.outputHeight))));
-  let yIndex = sourceY * frameParams.yStride + sourceX;
-  let uvIndex = (sourceY / 2u) * frameParams.uvStride + (sourceX / 2u);
-  let y = normalize_y(sample_y10(yIndex));
-  let u = normalize_uv(sample_u10(uvIndex));
-  let v = normalize_uv(sample_v10(uvIndex));
+  let sourceCoord = vec2<f32>(
+    (f32(id.x) + 0.5) * f32(frameParams.sourceWidth) / f32(frameParams.outputWidth) - 0.5,
+    (f32(id.y) + 0.5) * f32(frameParams.sourceHeight) / f32(frameParams.outputHeight) - 0.5
+  );
+  // The current DV fixtures report AVCHROMA_LOC_LEFT: horizontally co-sited
+  // with the left luma sample and vertically centered for 4:2:0.
+  let chromaCoord = vec2<f32>(sourceCoord.x * 0.5, (sourceCoord.y - 0.5) * 0.5);
+  let y = sample_y_linear(sourceCoord);
+  let u = sample_u_linear(chromaCoord);
+  let v = sample_v_linear(chromaCoord);
 
   var rgb = render_dovi_rpu(y, u, v);
   if (frameParams.previewMode == 1u) {
