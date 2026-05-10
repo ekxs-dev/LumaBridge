@@ -407,6 +407,8 @@ function renderBench() {
     referenceMeta.innerHTML = `
       <dt>reference</dt><dd>${activeReference ? `${activeReference.name} ${activeReference.width} x ${activeReference.height}` : 'none'}</dd>
       <dt>MAE</dt><dd>${stats ? `${stats.meanAbsError.toFixed(2)} RGB avg (${stats.meanRgbAbsError.map((value) => value.toFixed(2)).join(', ')})` : 'waiting'}</dd>
+      ${stats ? `<dt>bias</dt><dd>${stats.meanRgbSignedError.map((value) => value.toFixed(2)).join(', ')}</dd>` : ''}
+      ${stats ? `<dt>ref avg</dt><dd>${stats.referenceAverageRgb.map((value) => value.toFixed(1)).join(', ')}</dd>` : ''}
       <dt>max</dt><dd>${stats ? `${stats.maxAbsError.toFixed(0)} at ${stats.maxAbsPixel.x},${stats.maxAbsPixel.y} ${stats.maxAbsPixel.channel}` : 'waiting'}</dd>
       ${stats ? `<dt>outliers</dt><dd>${stats.outlierPixels} above ${stats.outlierThreshold}</dd>` : ''}
       ${note ? `<dt>note</dt><dd>${note}</dd>` : ''}

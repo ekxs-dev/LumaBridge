@@ -31,6 +31,9 @@ describe('reference image comparison', () => {
     }, 9);
 
     expect(stats.meanRgbAbsError).toEqual([6, 1, 10]);
+    expect(stats.meanRgbSignedError).toEqual([4, 1, -10]);
+    expect(stats.outputAverageRgb).toEqual([25, 35, 45]);
+    expect(stats.referenceAverageRgb).toEqual([21, 34, 55]);
     expect(stats.meanAbsError).toBeCloseTo(17 / 3);
     expect(stats.maxAbsError).toBe(20);
     expect(stats.maxAbsPixel).toEqual({ x: 1, y: 0, channel: 'b', output: 60, reference: 80 });

@@ -25,4 +25,11 @@ describe('WGSL shader source', () => {
     expect(source).toContain('x/y: source min/max PQ, z/w: DV Level 1 max/avg PQ');
     expect(source).toContain('select(doviParams.sourcePq.y, doviParams.sourcePq.z, doviParams.sourcePq.z > 0.0)');
   });
+
+  it('applies the libplacebo DV offset normalization scale', () => {
+    const source = fs.readFileSync(shaderPath, 'utf8');
+
+    expect(source).toContain('let doviOffsetScale = 1024.0 / 1023.0');
+    expect(source).toContain('doviParams.nonlinearOffset.xyz * vec3<f32>(doviOffsetScale)');
+  });
 });

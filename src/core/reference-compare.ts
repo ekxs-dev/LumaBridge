@@ -14,6 +14,9 @@ export interface PixelErrorStats {
   comparedPixels: number;
   meanAbsError: number;
   meanRgbAbsError: [number, number, number];
+  meanRgbSignedError: [number, number, number];
+  outputAverageRgb: [number, number, number];
+  referenceAverageRgb: [number, number, number];
   maxAbsError: number;
   maxAbsPixel: {
     x: number;
@@ -39,6 +42,9 @@ export function comparePreviewToReference(
 
   let total = 0;
   const channelTotals: [number, number, number] = [0, 0, 0];
+  const signedTotals: [number, number, number] = [0, 0, 0];
+  const outputTotals: [number, number, number] = [0, 0, 0];
+  const referenceTotals: [number, number, number] = [0, 0, 0];
   let maxAbsError = -1;
   let maxAbsPixel: PixelErrorStats['maxAbsPixel'] = {
     x: 0,
@@ -54,9 +60,15 @@ export function comparePreviewToReference(
     const offset = pixel * 4;
     let pixelIsOutlier = false;
     for (let channel = 0; channel < 3; channel += 1) {
-      const error = Math.abs(preview.data[offset + channel] - reference.data[offset + channel]);
+      const output = preview.data[offset + channel];
+      const expected = reference.data[offset + channel];
+      const signedError = output - expected;
+      const error = Math.abs(signedError);
       total += error;
       channelTotals[channel] += error;
+      signedTotals[channel] += signedError;
+      outputTotals[channel] += output;
+      referenceTotals[channel] += expected;
       if (error > outlierThreshold) pixelIsOutlier = true;
       if (error > maxAbsError) {
         maxAbsError = error;
@@ -64,8 +76,8 @@ export function comparePreviewToReference(
           x: pixel % preview.width,
           y: Math.floor(pixel / preview.width),
           channel: CHANNELS[channel],
-          output: preview.data[offset + channel],
-          reference: reference.data[offset + channel],
+          output,
+          reference: expected,
         };
       }
     }
@@ -82,6 +94,21 @@ export function comparePreviewToReference(
       channelTotals[0] / comparedPixels,
       channelTotals[1] / comparedPixels,
       channelTotals[2] / comparedPixels,
+    ],
+    meanRgbSignedError: [
+      signedTotals[0] / comparedPixels,
+      signedTotals[1] / comparedPixels,
+      signedTotals[2] / comparedPixels,
+    ],
+    outputAverageRgb: [
+      outputTotals[0] / comparedPixels,
+      outputTotals[1] / comparedPixels,
+      outputTotals[2] / comparedPixels,
+    ],
+    referenceAverageRgb: [
+      referenceTotals[0] / comparedPixels,
+      referenceTotals[1] / comparedPixels,
+      referenceTotals[2] / comparedPixels,
     ],
     maxAbsError,
     maxAbsPixel,

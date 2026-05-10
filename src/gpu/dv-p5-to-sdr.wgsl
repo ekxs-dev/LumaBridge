@@ -299,7 +299,8 @@ fn render_dovi_rpu(y: f32, u: f32, v: f32) -> vec3<f32> {
     reshape_component(1u, encoded.y, encoded),
     reshape_component(2u, encoded.z, encoded)
   );
-  let nonlinearInput = reshaped - doviParams.nonlinearOffset.xyz;
+  let doviOffsetScale = 1024.0 / 1023.0;
+  let nonlinearInput = reshaped - doviParams.nonlinearOffset.xyz * vec3<f32>(doviOffsetScale);
   let lmsCode = clamp(dovi_matrix3_mul(
     doviParams.nonlinearMatrix0,
     doviParams.nonlinearMatrix1,

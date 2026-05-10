@@ -85,10 +85,10 @@ npm run test:rust
 - `src/core/rpu-metadata.ts` lazy-loads the generated Rust/WASM parser and converts selected-frame RPU NAL payloads into the 840-f32 compact shader metadata buffer. If parsing fails or no RPU payload is available, `/bench` falls back to identity metadata and reports that explicitly.
 - `src/core/webgpu-render.ts` runs the WGSL compute shader against the ffmpeg.wasm raw frame and reads back an RGBA8 SDR debug preview when WebGPU is available. It now accepts packed RPU metadata, but the WGSL reshape math is still simplified/debug quality.
 - `/bench` keeps the previous preview visible while a selected raw frame is being decoded/rendered and only draws the CPU preview as fallback, avoiding a CPU-to-WebGPU color flash during successful RPU renders.
-- `/bench` can manually load a libplacebo PNG reference and compare the current SDR preview readback against it. The report records RGB MAE, per-channel MAE, max-error pixel, and outlier count; this is a manual diagnostic, not the final automated fixture parity gate yet.
+- `/bench` can manually load a libplacebo PNG reference and compare the current SDR preview readback against it. The report records RGB MAE, per-channel MAE, signed RGB bias, output/reference averages, max-error pixel, and outlier count; this is a manual diagnostic, not the final automated fixture parity gate yet.
 - Rust `parse_rpu_metadata` now uses the MIT `dolby_vision` crate to parse real HEVC type-62 RPU payloads and fill compact metadata with Dolby matrices, offsets, source PQ, DV Level 1 max/avg PQ, pivots, and polynomial/MMR coefficient slots. It also retries ffmpeg single-packet RPU payloads with CRC-validated tail trimming because Annex-B copy probes can leave non-RPU bytes after the real RPU terminator. It is still pending final libplacebo parity for pivot interpretation, per-piece method/order packing, and shader application.
 - The browser WASM package is built with rustup stable + `wasm32-unknown-unknown` and `wasm-bindgen-cli` 0.2.121 via `npm run build:wasm`.
-- WGSL currently contains a debug compute path and simplified preview modes. It now applies ABI v2 RPU reshape metadata for diagnostics, the MMR basis terms and coefficient padding match libplacebo's `x*y`, `x*z`, `y*z`, `x*y*z` layout, the DV post step avoids an extra PQ OETF/EOTF round trip, and the SDR diagnostic tone map uses a BT.2390-style IPT/PQ path using DV Level 1 max PQ when present instead of the old Reinhard path. The result is not yet full libplacebo/reference validated.
+- WGSL currently contains a debug compute path and simplified preview modes. It now applies ABI v2 RPU reshape metadata for diagnostics, the MMR basis terms and coefficient padding match libplacebo's `x*y`, `x*z`, `y*z`, `x*y*z` layout, the DV decode offset follows libplacebo's full-range `1024/1023` normalization, the DV post step avoids an extra PQ OETF/EOTF round trip, and the SDR diagnostic tone map uses a BT.2390-style IPT/PQ path using DV Level 1 max PQ when present instead of the old Reinhard path. The result is not yet full libplacebo/reference validated.
 - Chrome currently rejects `meta` as a WGSL local identifier. Keep shader locals away from reserved keywords; `tests/unit/wgsl.test.ts` guards the regression that broke `/bench` WebGPU rendering.
 
 ## PR / Commit Guidance
@@ -134,6 +134,7 @@ npm run test:rust
 - [x] Fix Chrome WGSL shader compilation failure caused by reserved local identifier `meta`.
 - [x] Avoid CPU preview flash before successful WebGPU RPU render.
 - [x] Add manual `/bench` libplacebo PNG pixel-error comparison for current SDR preview.
+- [x] Add signed RGB bias and output/reference averages to manual reference comparison diagnostics.
 - [x] Replace diagnostic Reinhard tone mapping with a BT.2390-style IPT/PQ SDR path.
 - [ ] Implement and validate libplacebo-aligned DV polynomial/MMR reshape in WGSL.
 - [ ] Add real SDR frame readback and pixel-error comparison against `sdr_reference.png`.
