@@ -332,7 +332,7 @@ fn tone_map_bt2390_to_sdr(rgb2020Nits: vec3<f32>, inputMinPq: f32, inputMaxPq: f
     pq_eotf(outLmsPq.z)
   );
   let rgb709Linear = bt709_ipt_lms_to_rgb(outLmsNits) / vec3<f32>(targetNits);
-  return srgb_encode(rgb709Linear);
+  return bt709_oetf(rgb709Linear);
 }
 
 fn srgb_encode(linear: vec3<f32>) -> vec3<f32> {
@@ -340,6 +340,13 @@ fn srgb_encode(linear: vec3<f32>) -> vec3<f32> {
   let low = value * vec3<f32>(12.92);
   let high = vec3<f32>(1.055) * pow(value, vec3<f32>(1.0 / 2.4)) - vec3<f32>(0.055);
   return select(high, low, value <= vec3<f32>(0.0031308));
+}
+
+fn bt709_oetf(linear: vec3<f32>) -> vec3<f32> {
+  let value = clamp(linear, vec3<f32>(0.0), vec3<f32>(1.0));
+  let low = value * vec3<f32>(4.5);
+  let high = vec3<f32>(1.099) * pow(value, vec3<f32>(0.45)) - vec3<f32>(0.099);
+  return select(high, low, value < vec3<f32>(0.018));
 }
 
 fn pack_rgba8(rgb: vec3<f32>) -> u32 {

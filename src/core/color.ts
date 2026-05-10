@@ -30,6 +30,12 @@ export function pqOetf(nits: number): number {
   return ((c1 + c2 * normalized) / (1 + c3 * normalized)) ** m2;
 }
 
+export function bt709Oetf(linear: number): number {
+  const value = Math.min(1, Math.max(0, linear));
+  if (value < 0.018) return value * 4.5;
+  return 1.099 * value ** 0.45 - 0.099;
+}
+
 export function yuvBt2020ToRgb(y: number, u: number, v: number): [number, number, number] {
   const cb = u - 0.5;
   const cr = v - 0.5;

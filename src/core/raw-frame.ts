@@ -1,5 +1,6 @@
 import {
   bt2020ToBt709,
+  bt709Oetf,
   doviIptToLms,
   doviLmsToBt2020,
   normalizeYuv10Sample,
@@ -109,9 +110,9 @@ export function convertI420P10ToSdrPreview(frame: I420P10Frame, maxWidth = 960):
       ];
       const rgb709Nits = bt2020ToBt709(rgb2020Nits).map((value) => Math.max(0, value)) as [number, number, number];
       const rgbSdr: [number, number, number] = [
-        srgbEncode(bt2390ToneMap(rgb709Nits[0])),
-        srgbEncode(bt2390ToneMap(rgb709Nits[1])),
-        srgbEncode(bt2390ToneMap(rgb709Nits[2])),
+        bt709Oetf(bt2390ToneMap(rgb709Nits[0])),
+        bt709Oetf(bt2390ToneMap(rgb709Nits[1])),
+        bt709Oetf(bt2390ToneMap(rgb709Nits[2])),
       ];
       const offset = (y * width + x) * 4;
       const r = Math.round(rgbSdr[0] * 255);
@@ -173,9 +174,9 @@ export function convertI420P10ToDoviP5BasePreview(frame: I420P10Frame, maxWidth 
       const rgb2020Nits = doviLmsToBt2020(lmsNits);
       const rgb709Nits = bt2020ToBt709(rgb2020Nits).map((value) => Math.max(0, value)) as [number, number, number];
       const rgbSdr: [number, number, number] = [
-        srgbEncode(bt2390ToneMap(rgb709Nits[0])),
-        srgbEncode(bt2390ToneMap(rgb709Nits[1])),
-        srgbEncode(bt2390ToneMap(rgb709Nits[2])),
+        bt709Oetf(bt2390ToneMap(rgb709Nits[0])),
+        bt709Oetf(bt2390ToneMap(rgb709Nits[1])),
+        bt709Oetf(bt2390ToneMap(rgb709Nits[2])),
       ];
       const offset = (y * width + x) * 4;
       const r = Math.round(rgbSdr[0] * 255);

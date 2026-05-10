@@ -16,6 +16,8 @@ describe('WGSL shader source', () => {
 
     expect(source).toContain('fn tone_map_bt2390_pq');
     expect(source).toContain('fn tone_map_bt2390_to_sdr');
+    expect(source).toContain('fn bt709_oetf');
+    expect(source).toContain('return bt709_oetf(rgb709Linear)');
     expect(source).toContain('blackPower');
     expect(source).toContain('gainInv');
     expect(source).not.toContain('tone_map_reinhard');

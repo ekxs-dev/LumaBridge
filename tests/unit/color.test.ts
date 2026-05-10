@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   bt2020ToBt709,
+  bt709Oetf,
   bt2390ToneMap,
   bt2390ToneMapPq,
   doviIptToLms,
@@ -26,6 +27,13 @@ describe('color math references', () => {
     expect(pqEotf(0)).toBeCloseTo(0);
     expect(pqEotf(1)).toBeCloseTo(10000, 0);
     expect(pqEotf(pqOetf(100))).toBeCloseTo(100, 3);
+  });
+
+  it('computes BT.709 OETF anchor points for reference PNG output', () => {
+    expect(bt709Oetf(0)).toBe(0);
+    expect(bt709Oetf(1)).toBeCloseTo(1);
+    expect(bt709Oetf(0.018)).toBeCloseTo(0.081, 3);
+    expect(bt709Oetf(0.18)).toBeCloseTo(0.409, 3);
   });
 
   it('converts BT.2020 YUV to RGB and then BT.709', () => {
