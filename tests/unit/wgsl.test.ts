@@ -77,9 +77,12 @@ describe('WGSL shader source', () => {
 
     expect(source).toContain('var videoTexture: texture_external');
     expect(source).toContain('textureSampleBaseClampToEdge(videoTexture');
+    expect(source).toContain('var<uniform> previewParams: PreviewParams');
     expect(source).toContain('fn approximate_sdr_from_browser_rgb');
     expect(source).toContain('fn recover_dovi_p5_base_from_browser_rgb');
     expect(source).toContain('fn browser_bt709_rgb_to_yuv');
+    expect(source).toContain('fn browser_bt2020_rgb_to_yuv');
+    expect(source).toContain('fn adjust_yuv_by_recovery_mode');
     expect(source).toContain('return vec4<f32>(recover_dovi_p5_base_from_browser_rgb(sampled.rgb), sampled.a)');
     for (const identifier of ['meta', 'target']) {
       expect(source).not.toMatch(new RegExp(`\\b(?:let|var)\\s+${identifier}\\b`));

@@ -25,7 +25,9 @@ import { inspectRpuAnnexBPacket, inspectRpuForSeconds, type RpuFrameSelection } 
 import { parseRpuMetadataForShader, type RpuMetadataProbe } from './core/rpu-metadata';
 import { renderI420P10SdrWithWebGpu, type WebGpuSdrRenderProbe } from './core/webgpu-render';
 import {
+  EXTERNAL_PREVIEW_RECOVERY_MODES,
   renderWebCodecsExternalTexturePreview,
+  type ExternalPreviewRecoveryMode,
   type WebGpuExternalPreviewStats,
 } from './core/webgpu-external-preview';
 import { uploadI420P10ToWebGpu, type WebGpuUploadProbe } from './core/webgpu-upload';
@@ -226,6 +228,12 @@ function renderBench() {
           <button id="ffmpeg-raw-probe" class="secondary-button" type="button" disabled>Render selected SDR frame</button>
           <button id="webcodecs-fast-preview" class="secondary-button" type="button" disabled>Fast WebCodecs preview</button>
           <button id="webgpu-external-preview-button" class="secondary-button" type="button" disabled>Fast WebGPU SDR preview</button>
+          <label class="select-field" for="external-recovery-mode">
+            <span>external recovery</span>
+            <select id="external-recovery-mode" disabled>
+              ${EXTERNAL_PREVIEW_RECOVERY_MODES.map((mode) => `<option value="${mode}"${mode === 'recover-709-full' ? ' selected' : ''}>${mode}</option>`).join('')}
+            </select>
+          </label>
           <h2 class="subhead">Frame/RPU alignment</h2>
           <dl class="debug-list compact" id="frame-rpu-meta">
             <dt>time</dt><dd>not selected</dd>
@@ -332,6 +340,7 @@ function renderBench() {
   const ffmpegRawProbe = document.querySelector<HTMLButtonElement>('#ffmpeg-raw-probe');
   const webCodecsFastPreview = document.querySelector<HTMLButtonElement>('#webcodecs-fast-preview');
   const webGpuExternalPreviewButton = document.querySelector<HTMLButtonElement>('#webgpu-external-preview-button');
+  const externalRecoveryModeSelect = document.querySelector<HTMLSelectElement>('#external-recovery-mode');
   const sdrPreviewCanvas = document.querySelector<HTMLCanvasElement>('#sdr-preview');
   const externalPreviewCanvas = document.querySelector<HTMLCanvasElement>('#external-preview');
   const sdrPreviewMeta = document.querySelector<HTMLElement>('#sdr-preview-meta');
@@ -609,8 +618,16 @@ function renderBench() {
     if (ffmpegRawProbe) ffmpegRawProbe.disabled = manualDisabled;
     if (webCodecsFastPreview) webCodecsFastPreview.disabled = manualDisabled || !activeParsedSource;
     if (webGpuExternalPreviewButton) webGpuExternalPreviewButton.disabled = manualDisabled || !activeParsedSource;
+    if (externalRecoveryModeSelect) externalRecoveryModeSelect.disabled = manualDisabled || !activeParsedSource;
     if (realtimeToggle) realtimeToggle.disabled = !realtimeRunning && (baseDisabled || isRenderingRawPreview);
     if (realtimeFpsInput) realtimeFpsInput.disabled = baseDisabled || isRenderingRawPreview || realtimeRunning;
+  };
+
+  const readExternalRecoveryMode = (): ExternalPreviewRecoveryMode => {
+    const value = externalRecoveryModeSelect?.value;
+    return EXTERNAL_PREVIEW_RECOVERY_MODES.includes(value as ExternalPreviewRecoveryMode)
+      ? value as ExternalPreviewRecoveryMode
+      : 'recover-709-full';
   };
 
   const clampPreviewSeconds = (seconds: number) => {
@@ -1231,6 +1248,7 @@ function renderBench() {
     if (ffmpegRawProbe) ffmpegRawProbe.textContent = 'Render selected SDR frame';
     if (webCodecsFastPreview) webCodecsFastPreview.textContent = 'Fast WebCodecs preview';
     if (webGpuExternalPreviewButton) webGpuExternalPreviewButton.textContent = 'Fast WebGPU SDR preview';
+    if (externalRecoveryModeSelect) externalRecoveryModeSelect.value = 'recover-709-full';
     writePreviewSeconds(0, false);
     updatePreviewControlsMax();
     setPreviewControlsDisabled(true);
@@ -1388,6 +1406,7 @@ function renderBench() {
     isRenderingRawPreview = true;
     setPreviewControlsDisabled(true);
     showPreviewCanvas('external');
+    const recoveryMode = readExternalRecoveryMode();
     webGpuExternalPreviewButton.textContent = 'Running WebGPU preview...';
     lastSdrPreview = null;
     report.referenceCompare = null;
@@ -1396,6 +1415,7 @@ function renderBench() {
     updateSdrPreviewStatus([
       'Fast WebGPU SDR preview running',
       'WebCodecs VideoFrames are imported as WebGPU external textures',
+      `recovery ${recoveryMode}`,
       'Playing at frame timestamps; approximate color, not libplacebo/reference SDR',
     ]);
     updateReport();
@@ -1404,6 +1424,7 @@ function renderBench() {
         maxFrames: 720,
         maxSeconds: 30,
         realtime: true,
+        recoveryMode,
       });
       report.webCodecsExternalPreview = stats;
       updateDecodeMeta(report.decoderAdapter);
@@ -1411,6 +1432,7 @@ function renderBench() {
         stats.ok ? 'Fast WebGPU SDR preview complete' : 'Fast WebGPU SDR preview failed',
         `${stats.drawnFrames} drawn / ${stats.decodedFrames} decoded`,
         `${stats.presentationMode} ${stats.effectiveFps.toFixed(1)} fps, ${stats.elapsedMs.toFixed(1)} ms`,
+        `recovery ${stats.recoveryMode}`,
         stats.error ?? 'External texture path is fast but starts from browser-converted opaque RGB',
       ]);
     } finally {
