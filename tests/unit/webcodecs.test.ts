@@ -50,4 +50,32 @@ describe('WebCodecs planning', () => {
       'hvc1.2.6.L150.B0',
     ]);
   });
+
+  it('starts selected-time previews from the nearest previous sync sample', () => {
+    const track = {
+      id: 1,
+      handlerType: 'vide',
+      timescale: 1000,
+      duration: 1000,
+      width: 1920,
+      height: 1080,
+      codecType: 'hev1',
+      hevcConfig: null,
+      hasDolbyVisionConfig: true,
+      sampleCount: 6,
+      samples: [
+        { index: 0, offset: 0, size: 10, dts: 0, cts: 0, duration: 40, isSync: true },
+        { index: 1, offset: 10, size: 10, dts: 40, cts: 40, duration: 40, isSync: false },
+        { index: 2, offset: 20, size: 10, dts: 80, cts: 80, duration: 40, isSync: false },
+        { index: 3, offset: 30, size: 10, dts: 120, cts: 120, duration: 40, isSync: true },
+        { index: 4, offset: 40, size: 10, dts: 160, cts: 160, duration: 40, isSync: false },
+        { index: 5, offset: 50, size: 10, dts: 200, cts: 200, duration: 40, isSync: false },
+      ],
+    };
+
+    expect(__webcodecsTestHooks.findDecodeStartSampleIndex(track, 1)).toBe(0);
+    expect(__webcodecsTestHooks.findDecodeStartSampleIndex(track, 119_000)).toBe(0);
+    expect(__webcodecsTestHooks.findDecodeStartSampleIndex(track, 120_000)).toBe(3);
+    expect(__webcodecsTestHooks.findDecodeStartSampleIndex(track, 199_000)).toBe(3);
+  });
 });

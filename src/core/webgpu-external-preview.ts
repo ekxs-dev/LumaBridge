@@ -4,7 +4,9 @@ import type { Mp4VideoTrack } from './mp4';
 import {
   buildVideoDecoderConfig,
   createEncodedVideoChunk,
+  findDecodeStartSampleIndex,
   findSupportedVideoDecoderConfig,
+  sampleTimestampUs,
   uniqueCodecCandidates,
 } from './webcodecs';
 
@@ -51,6 +53,8 @@ export interface WebGpuExternalPreviewStats {
   elapsedMs: number;
   averageDecodeMs: number | null;
   effectiveFps: number;
+  requestedStartSeconds: number;
+  firstDrawnTimestampUs: number | null;
   lastTimestampUs: number | null;
   format: string | null;
   colorSpace: Record<string, unknown> | null;
@@ -133,6 +137,8 @@ function baseStats(startedAt: number, codec: string | null): WebGpuExternalPrevi
     elapsedMs: performance.now() - startedAt,
     averageDecodeMs: null,
     effectiveFps: 0,
+    requestedStartSeconds: 0,
+    firstDrawnTimestampUs: null,
     lastTimestampUs: null,
     format: null,
     colorSpace: null,
@@ -155,6 +161,7 @@ export async function renderWebCodecsExternalTexturePreview(
   options: {
     maxFrames?: number;
     maxSeconds?: number;
+    startSeconds?: number;
     realtime?: boolean;
     recoveryMode?: ExternalPreviewRecoveryMode;
   } = {},
@@ -162,14 +169,16 @@ export async function renderWebCodecsExternalTexturePreview(
   const startedAt = performance.now();
   const codec = track.hevcConfig?.codecString ?? null;
   const recoveryMode = options.recoveryMode ?? 'recover-709-full';
+  const requestedStartSeconds = Math.max(0, Number.isFinite(options.startSeconds) ? options.startSeconds ?? 0 : 0);
+  const requestedStartTimestampUs = Math.round(requestedStartSeconds * 1_000_000);
   if (typeof VideoDecoder === 'undefined' || typeof EncodedVideoChunk === 'undefined') {
-    return { ...baseStats(startedAt, codec), recoveryMode, error: 'WebCodecs VideoDecoder is unavailable.' };
+    return { ...baseStats(startedAt, codec), recoveryMode, requestedStartSeconds, error: 'WebCodecs VideoDecoder is unavailable.' };
   }
   if (typeof navigator === 'undefined' || !('gpu' in navigator)) {
-    return { ...baseStats(startedAt, codec), recoveryMode, error: 'WebGPU is unavailable in this environment.' };
+    return { ...baseStats(startedAt, codec), recoveryMode, requestedStartSeconds, error: 'WebGPU is unavailable in this environment.' };
   }
   if (!track.hevcConfig) {
-    return { ...baseStats(startedAt, codec), recoveryMode, error: 'Missing hvcC decoder description.' };
+    return { ...baseStats(startedAt, codec), recoveryMode, requestedStartSeconds, error: 'Missing hvcC decoder description.' };
   }
 
   const config = buildVideoDecoderConfig(track);
@@ -177,12 +186,13 @@ export async function renderWebCodecsExternalTexturePreview(
   try {
     supportedConfig = await findSupportedVideoDecoderConfig(config);
   } catch (error) {
-    return { ...baseStats(startedAt, codec), recoveryMode, error: error instanceof Error ? error.message : String(error) };
+    return { ...baseStats(startedAt, codec), recoveryMode, requestedStartSeconds, error: error instanceof Error ? error.message : String(error) };
   }
   if (!supportedConfig) {
     return {
       ...baseStats(startedAt, codec),
       recoveryMode,
+      requestedStartSeconds,
       error: `VideoDecoder does not support any HEVC candidate: ${uniqueCodecCandidates(config.codec).join(', ')}.`,
     };
   }
@@ -190,7 +200,7 @@ export async function renderWebCodecsExternalTexturePreview(
   const gpu = (navigator as Navigator & { gpu: GpuNavigatorLike }).gpu;
   const adapter = await gpu.requestAdapter();
   if (!adapter) {
-    return { ...baseStats(startedAt, supportedConfig.codec), recoveryMode, error: 'WebGPU adapter request returned null.' };
+    return { ...baseStats(startedAt, supportedConfig.codec), recoveryMode, requestedStartSeconds, error: 'WebGPU adapter request returned null.' };
   }
 
   let device: GpuDeviceLike | null = null;
@@ -199,11 +209,11 @@ export async function renderWebCodecsExternalTexturePreview(
     device = await adapter.requestDevice();
     const bufferUsage = (globalThis as { GPUBufferUsage?: Record<string, number> }).GPUBufferUsage;
     if (!bufferUsage) {
-      return { ...baseStats(startedAt, supportedConfig.codec), recoveryMode, error: 'GPUBufferUsage is unavailable in this environment.' };
+      return { ...baseStats(startedAt, supportedConfig.codec), recoveryMode, requestedStartSeconds, error: 'GPUBufferUsage is unavailable in this environment.' };
     }
     const context = canvas.getContext('webgpu') as GpuCanvasContextLike | null;
     if (!context) {
-      return { ...baseStats(startedAt, supportedConfig.codec), recoveryMode, error: 'WebGPU canvas context is unavailable.' };
+      return { ...baseStats(startedAt, supportedConfig.codec), recoveryMode, requestedStartSeconds, error: 'WebGPU canvas context is unavailable.' };
     }
 
     const format = gpu.getPreferredCanvasFormat();
@@ -227,6 +237,7 @@ export async function renderWebCodecsExternalTexturePreview(
     let decodedFrames = 0;
     let drawnFrames = 0;
     let firstTimestampUs: number | null = null;
+    let firstDrawnTimestampUs: number | null = null;
     let lastTimestampUs: number | null = null;
     let firstOutputAt: number | null = null;
     let lastOutputAt: number | null = null;
@@ -277,8 +288,9 @@ export async function renderWebCodecsExternalTexturePreview(
 
     const presentFrame = async (frame: VideoFrame) => {
       firstPresentationAt ??= performance.now();
-      if (realtime && firstTimestampUs != null) {
-        const relativeMs = Math.max(0, (frame.timestamp - firstTimestampUs) / 1000);
+      const presentationBaseTimestampUs = firstDrawnTimestampUs ?? firstTimestampUs;
+      if (realtime && presentationBaseTimestampUs != null) {
+        const relativeMs = Math.max(0, (frame.timestamp - presentationBaseTimestampUs) / 1000);
         const dueAt = firstPresentationAt + relativeMs;
         const delayMs = dueAt - performance.now();
         if (delayMs > 1) await sleep(delayMs);
@@ -307,12 +319,18 @@ export async function renderWebCodecsExternalTexturePreview(
         formatLabel ??= frame.format;
         colorSpace ??= (frame.colorSpace?.toJSON?.() as Record<string, unknown> | undefined) ?? null;
 
+        if (frame.timestamp < requestedStartTimestampUs) {
+          frame.close();
+          return;
+        }
+        firstDrawnTimestampUs ??= frame.timestamp;
+
         queuedFrames += 1;
         pendingPresentation = pendingPresentation.then(() => presentFrame(frame));
 
         if (
-          decodedFrames >= maxFrames
-          || (firstTimestampUs != null && frame.timestamp - firstTimestampUs >= maxDurationUs)
+          drawnFrames + queuedFrames >= maxFrames
+          || (firstDrawnTimestampUs != null && frame.timestamp - firstDrawnTimestampUs >= maxDurationUs)
         ) {
           stopDecoding = true;
         }
@@ -324,8 +342,13 @@ export async function renderWebCodecsExternalTexturePreview(
 
     try {
       decoder.configure(supportedConfig);
-      for (const sample of track.samples) {
+      const startSampleIndex = findDecodeStartSampleIndex(track, requestedStartTimestampUs);
+      for (const sample of track.samples.slice(startSampleIndex)) {
         if (stopDecoding) break;
+        const sampleTimestamp = sampleTimestampUs(sample, track.timescale);
+        if (sampleTimestamp >= requestedStartTimestampUs + maxDurationUs && decodedFrames > 0) {
+          break;
+        }
         decoder.decode(createEncodedVideoChunk(fileBytes, sample, track));
         while (!stopDecoding && (decoder.decodeQueueSize > 16 || queuedFrames > 4)) {
           await sleep(4);
@@ -355,6 +378,8 @@ export async function renderWebCodecsExternalTexturePreview(
       elapsedMs,
       averageDecodeMs: decodedFrames > 0 ? elapsedMs / decodedFrames : null,
       effectiveFps: drawnFrames > 1 ? ((drawnFrames - 1) * 1000) / outputElapsedMs : 0,
+      requestedStartSeconds,
+      firstDrawnTimestampUs,
       lastTimestampUs,
       format: formatLabel,
       colorSpace,
@@ -365,7 +390,7 @@ export async function renderWebCodecsExternalTexturePreview(
       error: decoderError,
     };
   } catch (error) {
-    return { ...baseStats(startedAt, supportedConfig.codec), recoveryMode, error: error instanceof Error ? error.message : String(error) };
+    return { ...baseStats(startedAt, supportedConfig.codec), recoveryMode, requestedStartSeconds, error: error instanceof Error ? error.message : String(error) };
   } finally {
     for (const buffer of buffers) buffer.destroy();
     device?.destroy();

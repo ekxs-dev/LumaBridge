@@ -1369,11 +1369,12 @@ function renderBench() {
     const parsed = activeParsedSource;
     const track = activeTrack;
     if (!parsed || !track?.hevcConfig || !sdrPreviewCanvas) return;
+    const startSeconds = readPreviewSeconds();
     isRenderingRawPreview = true;
     setPreviewControlsDisabled(true);
     webCodecsFastPreview.textContent = 'Running fast preview...';
     updateSdrPreviewStatus([
-      'WebCodecs fast preview running',
+      `WebCodecs fast preview running from ${formatPreviewSeconds(startSeconds)}`,
       'Browser decoded VideoFrames are drawn directly to canvas',
       'This is a speed/visibility path, not the strict raw DV SDR path',
     ]);
@@ -1382,11 +1383,13 @@ function renderBench() {
       const stats = await renderWebCodecsCanvasPreview(parsed.bytes, track, sdrPreviewCanvas, {
         maxFrames: 180,
         maxSeconds: 6,
+        startSeconds,
       });
       report.webCodecsCanvasPreview = stats;
       updateDecodeMeta(report.decoderAdapter);
       updateSdrPreviewStatus([
         stats.ok ? 'WebCodecs fast preview complete' : 'WebCodecs fast preview failed',
+        `requested ${formatPreviewSeconds(stats.requestedStartSeconds)}${stats.firstDrawnTimestampUs != null ? `, first frame ${(stats.firstDrawnTimestampUs / 1_000_000).toFixed(2)} s` : ''}`,
         `${stats.drawnFrames} drawn / ${stats.decodedFrames} decoded`,
         `${stats.effectiveFps.toFixed(1)} fps, ${stats.elapsedMs.toFixed(1)} ms`,
         stats.error ?? 'Browser opaque VideoFrame path; color may not match DV SDR reference',
@@ -1407,13 +1410,14 @@ function renderBench() {
     setPreviewControlsDisabled(true);
     showPreviewCanvas('external');
     const recoveryMode = readExternalRecoveryMode();
+    const startSeconds = readPreviewSeconds();
     webGpuExternalPreviewButton.textContent = 'Running WebGPU preview...';
     lastSdrPreview = null;
     report.referenceCompare = null;
     report.referenceDiagnosis = null;
     updateReferenceMeta('External texture preview has no CPU readback yet; reference comparison is unavailable.');
     updateSdrPreviewStatus([
-      'Fast WebGPU SDR preview running',
+      `Fast WebGPU SDR preview running from ${formatPreviewSeconds(startSeconds)}`,
       'WebCodecs VideoFrames are imported as WebGPU external textures',
       `recovery ${recoveryMode}`,
       'Playing at frame timestamps; approximate color, not libplacebo/reference SDR',
@@ -1423,6 +1427,7 @@ function renderBench() {
       const stats = await renderWebCodecsExternalTexturePreview(parsed.bytes, track, externalPreviewCanvas, {
         maxFrames: 720,
         maxSeconds: 30,
+        startSeconds,
         realtime: true,
         recoveryMode,
       });
@@ -1430,6 +1435,7 @@ function renderBench() {
       updateDecodeMeta(report.decoderAdapter);
       updateSdrPreviewStatus([
         stats.ok ? 'Fast WebGPU SDR preview complete' : 'Fast WebGPU SDR preview failed',
+        `requested ${formatPreviewSeconds(stats.requestedStartSeconds)}${stats.firstDrawnTimestampUs != null ? `, first frame ${(stats.firstDrawnTimestampUs / 1_000_000).toFixed(2)} s` : ''}`,
         `${stats.drawnFrames} drawn / ${stats.decodedFrames} decoded`,
         `${stats.presentationMode} ${stats.effectiveFps.toFixed(1)} fps, ${stats.elapsedMs.toFixed(1)} ms`,
         `recovery ${stats.recoveryMode}`,

@@ -42,6 +42,8 @@ export interface WebCodecsCanvasPreviewStats {
   elapsedMs: number;
   averageDecodeMs: number | null;
   effectiveFps: number;
+  requestedStartSeconds: number;
+  firstDrawnTimestampUs: number | null;
   lastTimestampUs: number | null;
   format: string | null;
   colorSpace: Record<string, unknown> | null;
@@ -116,18 +118,38 @@ export function createEncodedVideoChunk(fileBytes: Uint8Array, sample: Mp4Sample
   });
 }
 
+export function findDecodeStartSampleIndex(track: Mp4VideoTrack, startTimestampUs: number): number {
+  if (track.samples.length === 0) return 0;
+
+  let lastAtOrBefore = 0;
+  for (let index = 0; index < track.samples.length; index += 1) {
+    if (sampleTimestampUs(track.samples[index], track.timescale) > startTimestampUs) {
+      break;
+    }
+    lastAtOrBefore = index;
+  }
+
+  for (let index = lastAtOrBefore; index >= 0; index -= 1) {
+    if (track.samples[index].isSync) return index;
+  }
+  return 0;
+}
+
 export const __webcodecsTestHooks = {
   uniqueCodecCandidates,
+  findDecodeStartSampleIndex,
 };
 
 export async function renderWebCodecsCanvasPreview(
   fileBytes: Uint8Array,
   track: Mp4VideoTrack,
   canvas: HTMLCanvasElement,
-  options: { maxFrames?: number; maxSeconds?: number } = {},
+  options: { maxFrames?: number; maxSeconds?: number; startSeconds?: number } = {},
 ): Promise<WebCodecsCanvasPreviewStats> {
   const startedAt = performance.now();
   const codec = track.hevcConfig?.codecString ?? null;
+  const requestedStartSeconds = Math.max(0, Number.isFinite(options.startSeconds) ? options.startSeconds ?? 0 : 0);
+  const requestedStartTimestampUs = Math.round(requestedStartSeconds * 1_000_000);
   const base = (): WebCodecsCanvasPreviewStats => ({
     attempted: true,
     ok: false,
@@ -137,6 +159,8 @@ export async function renderWebCodecsCanvasPreview(
     elapsedMs: performance.now() - startedAt,
     averageDecodeMs: null,
     effectiveFps: 0,
+    requestedStartSeconds,
+    firstDrawnTimestampUs: null,
     lastTimestampUs: null,
     format: null,
     colorSpace: null,
@@ -172,6 +196,7 @@ export async function renderWebCodecsCanvasPreview(
   let decodedFrames = 0;
   let drawnFrames = 0;
   let firstTimestampUs: number | null = null;
+  let firstDrawnTimestampUs: number | null = null;
   let lastTimestampUs: number | null = null;
   let firstOutputAt: number | null = null;
   let lastOutputAt: number | null = null;
@@ -189,15 +214,20 @@ export async function renderWebCodecsCanvasPreview(
       lastTimestampUs = frame.timestamp;
       format ??= frame.format;
       colorSpace ??= (frame.colorSpace?.toJSON?.() as Record<string, unknown> | undefined) ?? null;
+      if (frame.timestamp < requestedStartTimestampUs) {
+        frame.close();
+        return;
+      }
       if (drawnFrames === 0) {
         canvas.width = frame.displayWidth || frame.codedWidth;
         canvas.height = frame.displayHeight || frame.codedHeight;
+        firstDrawnTimestampUs = frame.timestamp;
       }
       ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
       drawnFrames += 1;
       if (
         drawnFrames >= maxFrames
-        || (firstTimestampUs != null && frame.timestamp - firstTimestampUs >= maxDurationUs)
+        || (firstDrawnTimestampUs != null && frame.timestamp - firstDrawnTimestampUs >= maxDurationUs)
       ) {
         stopDecoding = true;
       }
@@ -210,7 +240,8 @@ export async function renderWebCodecsCanvasPreview(
 
   try {
     decoder.configure(supportedConfig);
-    for (const sample of track.samples) {
+    const startSampleIndex = findDecodeStartSampleIndex(track, requestedStartTimestampUs);
+    for (const sample of track.samples.slice(startSampleIndex)) {
       if (stopDecoding) break;
       decoder.decode(createEncodedVideoChunk(fileBytes, sample, track));
       if (decoder.decodeQueueSize > 24) {
@@ -235,6 +266,8 @@ export async function renderWebCodecsCanvasPreview(
     elapsedMs,
     averageDecodeMs: decodedFrames > 0 ? elapsedMs / decodedFrames : null,
     effectiveFps: drawnFrames > 1 ? ((drawnFrames - 1) * 1000) / outputElapsedMs : 0,
+    requestedStartSeconds,
+    firstDrawnTimestampUs,
     lastTimestampUs,
     format,
     colorSpace,
