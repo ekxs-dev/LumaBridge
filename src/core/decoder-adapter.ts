@@ -56,6 +56,7 @@ let ffmpegInstance: FFmpeg | null = null;
 let ffmpegLoadPromise: Promise<FFmpeg> | null = null;
 let ffmpegLogs: string[] = [];
 const MEMFS_COPY_LIMIT_BYTES = 128 * 1024 * 1024;
+const FFMPEG_FAST_SEEK_LEAD_SECONDS = 2;
 
 function shouldFallbackFromWebCodecs(probe: DecodedFrameProbe): string | null {
   if (!probe.supported) return probe.error ?? 'WebCodecs did not support the HEVC decoder config.';
@@ -122,6 +123,16 @@ function formatSeekSeconds(value: number): string {
   return Math.max(0, value).toFixed(3);
 }
 
+function hybridSeekArgs(seekSeconds: number): { input: string[]; output: string[] } {
+  if (seekSeconds <= 0) return { input: [], output: [] };
+  const inputSeekSeconds = Math.max(0, seekSeconds - FFMPEG_FAST_SEEK_LEAD_SECONDS);
+  const outputSeekSeconds = seekSeconds - inputSeekSeconds;
+  return {
+    input: inputSeekSeconds > 0 ? ['-ss', formatSeekSeconds(inputSeekSeconds)] : [],
+    output: outputSeekSeconds > 0 ? ['-ss', formatSeekSeconds(outputSeekSeconds)] : [],
+  };
+}
+
 async function decodeRawFrameWithFfmpeg(
   ffmpeg: FFmpeg,
   file: File,
@@ -158,14 +169,15 @@ async function decodeRawFrameWithFfmpeg(
       copied = true;
     }
 
-    const seekArgs = safeSeekSeconds > 0 ? ['-ss', formatSeekSeconds(safeSeekSeconds)] : [];
+    const seekArgs = hybridSeekArgs(safeSeekSeconds);
     const exitCode = await ffmpeg.exec([
       '-v',
       'error',
       '-y',
-      ...seekArgs,
+      ...seekArgs.input,
       '-i',
       inputPath,
+      ...seekArgs.output,
       '-map',
       '0:v:0',
       '-frames:v',
@@ -274,14 +286,15 @@ async function extractHevcPacketWithFfmpeg(ffmpeg: FFmpeg, file: File, seekSecon
       copied = true;
     }
 
-    const seekArgs = safeSeekSeconds > 0 ? ['-ss', formatSeekSeconds(safeSeekSeconds)] : [];
+    const seekArgs = hybridSeekArgs(safeSeekSeconds);
     const exitCode = await ffmpeg.exec([
       '-v',
       'error',
       '-y',
-      ...seekArgs,
+      ...seekArgs.input,
       '-i',
       inputPath,
+      ...seekArgs.output,
       '-map',
       '0:v:0',
       '-frames:v',

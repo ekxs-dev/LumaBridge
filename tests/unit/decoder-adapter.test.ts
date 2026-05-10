@@ -160,7 +160,10 @@ describe('decoder adapter', () => {
 
     expect(probe.rawFrame.ok).toBe(true);
     expect(probe.rawFrame.seekSeconds).toBe(12.5);
-    expect(ffmpegMock.execCalls.at(-1)).toEqual(expect.arrayContaining(['-ss', '12.500']));
+    const lastCall = ffmpegMock.execCalls.at(-1) ?? [];
+    expect(lastCall.filter((arg) => arg === '-ss')).toHaveLength(2);
+    expect(lastCall).toEqual(expect.arrayContaining(['-ss', '10.500']));
+    expect(lastCall).toEqual(expect.arrayContaining(['-ss', '2.000']));
     expect(ffmpegMock.execCalls.at(-1)).toEqual(expect.arrayContaining(['-pix_fmt', 'yuv420p10le']));
   });
 
@@ -173,7 +176,10 @@ describe('decoder adapter', () => {
     expect(probe.ok).toBe(true);
     expect(probe.seekSeconds).toBe(45.25);
     expect(probe.bytes).toBe(7);
-    expect(ffmpegMock.execCalls.at(-1)).toEqual(expect.arrayContaining(['-ss', '45.250']));
+    const lastCall = ffmpegMock.execCalls.at(-1) ?? [];
+    expect(lastCall.filter((arg) => arg === '-ss')).toHaveLength(2);
+    expect(lastCall).toEqual(expect.arrayContaining(['-ss', '43.250']));
+    expect(lastCall).toEqual(expect.arrayContaining(['-ss', '2.000']));
     expect(ffmpegMock.execCalls.at(-1)).toEqual(expect.arrayContaining(['-c:v', 'copy']));
     expect(ffmpegMock.execCalls.at(-1)).toEqual(expect.arrayContaining(['-bsf:v', 'hevc_mp4toannexb']));
     expect(ffmpegMock.execCalls.at(-1)).toEqual(expect.arrayContaining(['-f', 'hevc']));

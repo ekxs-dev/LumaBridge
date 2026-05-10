@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { comparePreviewToReference } from '../../src/core/reference-compare';
+import { comparePreviewToReference, diagnoseReferenceGap } from '../../src/core/reference-compare';
 import type { SdrPreviewImage } from '../../src/core/raw-frame';
 
 function image(data: number[]): SdrPreviewImage {
@@ -48,5 +48,37 @@ describe('reference image comparison', () => {
       height: 1,
       data: new Uint8ClampedArray([0, 0, 0, 255]),
     })).toThrow(/do not match/);
+  });
+
+  it('diagnoses visible libplacebo gaps from bias and pipeline context', () => {
+    const stats = comparePreviewToReference(image([
+      18, 44, 58, 255,
+      20, 40, 50, 255,
+    ]), {
+      name: 'ref.png',
+      width: 2,
+      height: 1,
+      data: new Uint8ClampedArray([
+        32, 32, 42, 255,
+        30, 34, 44, 255,
+      ]),
+    }, 9);
+
+    const diagnosis = diagnoseReferenceGap(stats, {
+      previewMode: 'sdr-approx',
+      renderer: 'webgpu',
+      metadataSource: 'rpu-packed',
+      rpuAlignment: 'ffmpeg-packet-probe',
+    });
+
+    expect(diagnosis.severity).toBe('visible');
+    expect(diagnosis.summary).toContain('bias RGB');
+    expect(diagnosis.likelyCauses).toEqual(expect.arrayContaining([
+      expect.stringContaining('cyan/blue-green'),
+      expect.stringContaining('packet probe'),
+    ]));
+    expect(diagnosis.nextChecks).toEqual(expect.arrayContaining([
+      expect.stringContaining('streaming MKV demux'),
+    ]));
   });
 });

@@ -24,7 +24,13 @@ import { parseRpuMetadataForShader, type RpuMetadataProbe } from './core/rpu-met
 import { renderI420P10SdrWithWebGpu, type WebGpuSdrRenderProbe } from './core/webgpu-render';
 import { uploadI420P10ToWebGpu, type WebGpuUploadProbe } from './core/webgpu-upload';
 import type { DecodedFrameProbe } from './core/webcodecs';
-import { comparePreviewToReference, type PixelErrorStats, type ReferenceImage } from './core/reference-compare';
+import {
+  comparePreviewToReference,
+  diagnoseReferenceGap,
+  type PixelErrorStats,
+  type ReferenceGapDiagnosis,
+  type ReferenceImage,
+} from './core/reference-compare';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -148,6 +154,7 @@ function renderBench() {
       nonBlackPixels: number;
     },
     referenceCompare: null as PixelErrorStats | null,
+    referenceDiagnosis: null as ReferenceGapDiagnosis | null,
     parseError: null as string | null,
     summary,
   };
@@ -411,26 +418,44 @@ function renderBench() {
       ${stats ? `<dt>ref avg</dt><dd>${stats.referenceAverageRgb.map((value) => value.toFixed(1)).join(', ')}</dd>` : ''}
       <dt>max</dt><dd>${stats ? `${stats.maxAbsError.toFixed(0)} at ${stats.maxAbsPixel.x},${stats.maxAbsPixel.y} ${stats.maxAbsPixel.channel}` : 'waiting'}</dd>
       ${stats ? `<dt>outliers</dt><dd>${stats.outlierPixels} above ${stats.outlierThreshold}</dd>` : ''}
+      ${report.referenceDiagnosis ? `<dt>diagnosis</dt><dd>${report.referenceDiagnosis.summary}</dd>` : ''}
       ${note ? `<dt>note</dt><dd>${note}</dd>` : ''}
     `;
+  };
+
+  const currentRpuAlignment = () => {
+    const frameRpu = report.frameRpu;
+    if (!frameRpu) return null;
+    if (frameRpu.sampleIndex != null) return 'parsed-sample';
+    if (frameRpu.status === 'present' || frameRpu.status === 'missing') return 'ffmpeg-packet-probe';
+    return 'unresolved';
   };
 
   const compareLastPreviewWithReference = (note: string | null = null) => {
     if (!activeReference) {
       report.referenceCompare = null;
+      report.referenceDiagnosis = null;
       updateReferenceMeta(note);
       return;
     }
     if (!lastSdrPreview) {
       report.referenceCompare = null;
+      report.referenceDiagnosis = null;
       updateReferenceMeta(note ?? 'Render a frame before comparing.');
       return;
     }
     try {
       report.referenceCompare = comparePreviewToReference(lastSdrPreview, activeReference);
+      report.referenceDiagnosis = diagnoseReferenceGap(report.referenceCompare, {
+        previewMode,
+        renderer: report.sdrPreview?.renderer ?? null,
+        metadataSource: report.gpuRender?.metadataSource ?? null,
+        rpuAlignment: currentRpuAlignment(),
+      });
       updateReferenceMeta(note);
     } catch (error) {
       report.referenceCompare = null;
+      report.referenceDiagnosis = null;
       updateReferenceMeta(error instanceof Error ? error.message : String(error));
     }
   };
@@ -557,6 +582,7 @@ function renderBench() {
     if (!sdrPreviewCanvas) return;
     lastSdrPreview = null;
     report.referenceCompare = null;
+    report.referenceDiagnosis = null;
     const ctx = sdrPreviewCanvas.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, sdrPreviewCanvas.width, sdrPreviewCanvas.height);
@@ -585,8 +611,8 @@ function renderBench() {
   ) => {
     if (!sdrPreviewCanvas) return;
     lastSdrPreview = preview;
-    sdrPreviewCanvas.width = preview.width;
-    sdrPreviewCanvas.height = preview.height;
+    if (sdrPreviewCanvas.width !== preview.width) sdrPreviewCanvas.width = preview.width;
+    if (sdrPreviewCanvas.height !== preview.height) sdrPreviewCanvas.height = preview.height;
     const ctx = sdrPreviewCanvas.getContext('2d');
     if (!ctx) return;
     ctx.putImageData(new ImageData(preview.data, preview.width, preview.height), 0, 0);
@@ -905,6 +931,7 @@ function renderBench() {
     report.gpuRender = null;
     report.sdrPreview = null;
     report.referenceCompare = null;
+    report.referenceDiagnosis = null;
     activeTrack = null;
     activeParsedSource = null;
     report.parseError = null;
@@ -1011,6 +1038,7 @@ function renderBench() {
     const file = referenceFileInput.files?.[0];
     if (!file) return;
     report.referenceCompare = null;
+    report.referenceDiagnosis = null;
     updateReferenceMeta('Loading reference image.');
     updateReport();
     try {
@@ -1019,6 +1047,7 @@ function renderBench() {
     } catch (error) {
       activeReference = null;
       report.referenceCompare = null;
+      report.referenceDiagnosis = null;
       updateReferenceMeta(error instanceof Error ? error.message : String(error));
     }
     updateReport();

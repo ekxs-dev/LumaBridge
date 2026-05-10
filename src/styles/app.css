@@ -112,6 +112,11 @@ h2 {
   margin: 0;
 }
 
+.debug-list dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .viewer {
   margin-top: 32px;
 }
