@@ -89,7 +89,7 @@ export function createIdentityDoviMetadata(): DoviCompactMetadata {
     linearMatrix: [1, 0, 0, 0, 1, 0, 0, 0, 1],
     sourceMinPq: 0,
     sourceMaxPq: 1,
-    reshapeHeader: [2, 2, 2, 0],
+    reshapeHeader: [0, 0, 0, 0],
     pivots,
     pieceMeta,
     polyCoeffs,

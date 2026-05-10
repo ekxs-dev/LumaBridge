@@ -41,7 +41,7 @@ describe('compact metadata packing', () => {
     expect(floats[16]).toBe(1);
     expect(floats[28]).toBe(0);
     expect(floats[29]).toBe(1);
-    expect([...floats.slice(COMPACT_DOVI_LAYOUT.reshapeHeader, COMPACT_DOVI_LAYOUT.reshapeHeader + 4)]).toEqual([2, 2, 2, 0]);
+    expect([...floats.slice(COMPACT_DOVI_LAYOUT.reshapeHeader, COMPACT_DOVI_LAYOUT.reshapeHeader + 4)]).toEqual([0, 0, 0, 0]);
     expect([...floats.slice(COMPACT_DOVI_LAYOUT.polyCoeffs, COMPACT_DOVI_LAYOUT.polyCoeffs + 4)]).toEqual([0, 1, 0, 0]);
     expect([...floats.slice(COMPACT_DOVI_LAYOUT.polyCoeffs + 32, COMPACT_DOVI_LAYOUT.polyCoeffs + 36)]).toEqual([0, 1, 0, 0]);
     expect([...floats.slice(COMPACT_DOVI_LAYOUT.polyCoeffs + 64, COMPACT_DOVI_LAYOUT.polyCoeffs + 68)]).toEqual([0, 1, 0, 0]);

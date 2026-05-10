@@ -562,8 +562,29 @@ function renderBench() {
     report.rpuMetadata = metadata.probe;
     updateFrameRpuMeta(report.frameRpu, { preserveMetadata: true });
 
+    if (!metadata.probe.ok || metadata.probe.source !== 'wasm') {
+      updateGpuRenderMeta({
+        attempted: false,
+        ok: false,
+        elapsedMs: 0,
+        uploadElapsedMs: 0,
+        shaderElapsedMs: 0,
+        readbackElapsedMs: 0,
+        bytes: 0,
+        width: null,
+        height: null,
+        mode,
+        metadataSource: 'identity',
+        averageRgb: null,
+        nonBlackPixels: null,
+        error: metadata.probe.error ?? 'RPU metadata unavailable; preserving CPU debug preview.',
+      });
+      updateReport();
+      return;
+    }
+
     const gpuRender = await renderI420P10SdrWithWebGpu(gpuUpload, mode, {
-      doviMetadata: metadata.probe.ok && metadata.probe.source === 'wasm' ? metadata.packed : undefined,
+      doviMetadata: metadata.packed,
     });
     if (version !== selectionVersion) return;
     updateGpuRenderMeta(gpuRender.probe);

@@ -84,7 +84,7 @@ npm run test:rust
 - `src/core/gpu-upload.ts` prepares tightly packed `u32` Y/U/V storage-buffer data plus source/output frame params from I420P10 frames. `/bench` attempts a live WebGPU buffer upload after ffmpeg.wasm raw-frame decode when WebGPU is available.
 - `src/core/rpu-metadata.ts` lazy-loads the generated Rust/WASM parser and converts selected-frame RPU NAL payloads into the 840-f32 compact shader metadata buffer. If parsing fails or no RPU payload is available, `/bench` falls back to identity metadata and reports that explicitly.
 - `src/core/webgpu-render.ts` runs the WGSL compute shader against the ffmpeg.wasm raw frame and reads back an RGBA8 SDR debug preview when WebGPU is available. It now accepts packed RPU metadata, but the WGSL reshape math is still simplified/debug quality.
-- Rust `parse_rpu_metadata` now uses the MIT `dolby_vision` crate to parse real HEVC type-62 RPU payloads and fill compact metadata with Dolby matrices, offsets, source PQ, pivots, and polynomial/MMR coefficient slots. It is still pending final libplacebo parity for pivot interpretation, per-piece method/order packing, and shader application.
+- Rust `parse_rpu_metadata` now uses the MIT `dolby_vision` crate to parse real HEVC type-62 RPU payloads and fill compact metadata with Dolby matrices, offsets, source PQ, pivots, and polynomial/MMR coefficient slots. It also retries ffmpeg single-packet RPU payloads with CRC-validated tail trimming because Annex-B copy probes can leave non-RPU bytes after the real RPU terminator. It is still pending final libplacebo parity for pivot interpretation, per-piece method/order packing, and shader application.
 - The browser WASM package is built with rustup stable + `wasm32-unknown-unknown` and `wasm-bindgen-cli` 0.2.121 via `npm run build:wasm`.
 - WGSL currently contains a debug compute path and simplified preview modes. It now applies ABI v2 RPU reshape metadata for diagnostics, and the MMR basis terms match libplacebo's `x*y`, `x*z`, `y*z`, `x*y*z` layout. The result is not yet full libplacebo/reference validated.
 
@@ -117,6 +117,8 @@ npm run test:rust
 - [x] Generate browser WASM bindings for the Rust RPU parser and load them from TypeScript.
 - [x] Pass selected-frame packed RPU metadata into WebGPU render diagnostics when available.
 - [x] Expand compact metadata ABI to carry reshape header, per-piece method/order metadata, polynomial slots, and full MMR coefficient slots.
+- [x] Add CRC-validated RPU tail trimming for ffmpeg single-packet Annex-B probes.
+- [x] Preserve CPU debug preview instead of covering it with identity WebGPU output when RPU metadata parsing fails.
 - [ ] Validate RPU pivot/method/MMR packing against FFmpeg/libplacebo for all compact metadata slots.
 - [x] Define and freeze the compact metadata buffer ABI between Rust, TypeScript, and WGSL.
 - [x] Add deterministic I420P10 plane upload planning for WebGPU storage buffers.

@@ -76,7 +76,7 @@ impl Default for CompactDoviMetadata {
             linear_matrix: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
             source_min_pq: 0.0,
             source_max_pq: 1.0,
-            reshape_header: [2.0, 2.0, 2.0, 0.0],
+            reshape_header: [0.0, 0.0, 0.0, 0.0],
             pivots,
             piece_meta,
             poly_coeffs,
@@ -181,8 +181,28 @@ pub fn parse_rpu_metadata(rpu_payload: &[u8]) -> Result<CompactDoviMetadata, Lum
         return Err(LumaWasmError::InvalidRpu);
     }
 
-    let rpu = DoviRpu::parse_unspec62_nalu(rpu_payload).map_err(|_| LumaWasmError::InvalidRpu)?;
+    let rpu = parse_unspec62_nalu_lenient(rpu_payload)?;
     compact_metadata_from_dovi_rpu(&rpu).ok_or(LumaWasmError::InvalidRpu)
+}
+
+fn parse_unspec62_nalu_lenient(rpu_payload: &[u8]) -> Result<DoviRpu, LumaWasmError> {
+    if let Ok(rpu) = DoviRpu::parse_unspec62_nalu(rpu_payload) {
+        return Ok(rpu);
+    }
+
+    // ffmpeg's single-packet Annex-B copy path can leave non-RPU bytes after
+    // the real RPU rbsp terminator. Try shorter candidates ending at 0x80; the
+    // dolby_vision parser still validates CRC, so false positives are rejected.
+    for end in (25..rpu_payload.len()).rev() {
+        if rpu_payload[end - 1] != 0x80 {
+            continue;
+        }
+        if let Ok(rpu) = DoviRpu::parse_unspec62_nalu(&rpu_payload[..end]) {
+            return Ok(rpu);
+        }
+    }
+
+    Err(LumaWasmError::InvalidRpu)
 }
 
 fn compact_metadata_from_dovi_rpu(rpu: &DoviRpu) -> Option<CompactDoviMetadata> {
@@ -442,7 +462,7 @@ mod tests {
         assert_eq!(packed[29], 1.0);
         assert_eq!(
             &packed[COMPACT_DOVI_RESHAPE_HEADER_OFFSET..COMPACT_DOVI_RESHAPE_HEADER_OFFSET + 4],
-            &[2.0, 2.0, 2.0, 0.0]
+            &[0.0, 0.0, 0.0, 0.0]
         );
         assert_eq!(
             &packed[COMPACT_DOVI_POLY_COEFFS_OFFSET..COMPACT_DOVI_POLY_COEFFS_OFFSET + 4],
