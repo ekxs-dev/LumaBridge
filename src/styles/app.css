@@ -232,6 +232,27 @@ video {
   opacity: 0.55;
 }
 
+.reference-picker {
+  display: grid;
+  gap: 8px;
+  min-height: 54px;
+  padding: 12px;
+  border: 2px solid #18201f;
+  background: #fffaf0;
+  cursor: pointer;
+}
+
+.reference-picker input {
+  width: 100%;
+  max-width: 100%;
+}
+
+.reference-picker span {
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .bench-picker {
   display: grid;
   grid-template-columns: minmax(260px, 0.7fr) minmax(320px, 1.3fr);

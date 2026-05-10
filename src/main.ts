@@ -24,6 +24,7 @@ import { parseRpuMetadataForShader, type RpuMetadataProbe } from './core/rpu-met
 import { renderI420P10SdrWithWebGpu, type WebGpuSdrRenderProbe } from './core/webgpu-render';
 import { uploadI420P10ToWebGpu, type WebGpuUploadProbe } from './core/webgpu-upload';
 import type { DecodedFrameProbe } from './core/webcodecs';
+import { comparePreviewToReference, type PixelErrorStats, type ReferenceImage } from './core/reference-compare';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -146,6 +147,7 @@ function renderBench() {
       averageRgb: [number, number, number];
       nonBlackPixels: number;
     },
+    referenceCompare: null as PixelErrorStats | null,
     parseError: null as string | null,
     summary,
   };
@@ -213,6 +215,16 @@ function renderBench() {
             <dt>shader</dt><dd>unknown</dd>
             <dt>readback</dt><dd>unknown</dd>
           </dl>
+          <h2 class="subhead">Reference compare</h2>
+          <label class="reference-picker" for="reference-file">
+            <input id="reference-file" type="file" accept="image/png,image/*" />
+            <span>Load libplacebo PNG</span>
+          </label>
+          <dl class="debug-list compact" id="reference-meta">
+            <dt>reference</dt><dd>none</dd>
+            <dt>MAE</dt><dd>waiting</dd>
+            <dt>max</dt><dd>waiting</dd>
+          </dl>
         </div>
         <div class="video-frame">
           <video id="bench-video" controls muted playsinline preload="metadata"></video>
@@ -270,6 +282,8 @@ function renderBench() {
   const frameRpuMeta = document.querySelector<HTMLElement>('#frame-rpu-meta');
   const gpuUploadMeta = document.querySelector<HTMLElement>('#gpu-upload-meta');
   const gpuRenderMeta = document.querySelector<HTMLElement>('#gpu-render-meta');
+  const referenceFileInput = document.querySelector<HTMLInputElement>('#reference-file');
+  const referenceMeta = document.querySelector<HTMLElement>('#reference-meta');
   const reportJson = document.querySelector<HTMLElement>('#report-json');
   const ffmpegRawProbe = document.querySelector<HTMLButtonElement>('#ffmpeg-raw-probe');
   const sdrPreviewCanvas = document.querySelector<HTMLCanvasElement>('#sdr-preview');
@@ -282,6 +296,8 @@ function renderBench() {
   let selectionVersion = 0;
   let isRenderingRawPreview = false;
   let previewMode: RawPreviewMode = 'raw-luma';
+  let activeReference: ReferenceImage | null = null;
+  let lastSdrPreview: SdrPreviewImage | null = null;
 
   const updateReport = () => {
     if (reportJson) {
@@ -385,6 +401,59 @@ function renderBench() {
     `;
   };
 
+  const updateReferenceMeta = (note: string | null = null) => {
+    if (!referenceMeta) return;
+    const stats = report.referenceCompare;
+    referenceMeta.innerHTML = `
+      <dt>reference</dt><dd>${activeReference ? `${activeReference.name} ${activeReference.width} x ${activeReference.height}` : 'none'}</dd>
+      <dt>MAE</dt><dd>${stats ? `${stats.meanAbsError.toFixed(2)} RGB avg (${stats.meanRgbAbsError.map((value) => value.toFixed(2)).join(', ')})` : 'waiting'}</dd>
+      <dt>max</dt><dd>${stats ? `${stats.maxAbsError.toFixed(0)} at ${stats.maxAbsPixel.x},${stats.maxAbsPixel.y} ${stats.maxAbsPixel.channel}` : 'waiting'}</dd>
+      ${stats ? `<dt>outliers</dt><dd>${stats.outlierPixels} above ${stats.outlierThreshold}</dd>` : ''}
+      ${note ? `<dt>note</dt><dd>${note}</dd>` : ''}
+    `;
+  };
+
+  const compareLastPreviewWithReference = (note: string | null = null) => {
+    if (!activeReference) {
+      report.referenceCompare = null;
+      updateReferenceMeta(note);
+      return;
+    }
+    if (!lastSdrPreview) {
+      report.referenceCompare = null;
+      updateReferenceMeta(note ?? 'Render a frame before comparing.');
+      return;
+    }
+    try {
+      report.referenceCompare = comparePreviewToReference(lastSdrPreview, activeReference);
+      updateReferenceMeta(note);
+    } catch (error) {
+      report.referenceCompare = null;
+      updateReferenceMeta(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const loadReferenceImage = async (file: File): Promise<ReferenceImage> => {
+    const bitmap = await createImageBitmap(file);
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('2D canvas is unavailable for reference decoding.');
+      ctx.drawImage(bitmap, 0, 0);
+      const imageData = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+      return {
+        name: file.name,
+        width: bitmap.width,
+        height: bitmap.height,
+        data: new Uint8ClampedArray(imageData.data),
+      };
+    } finally {
+      bitmap.close();
+    }
+  };
+
   const formatPreviewSeconds = (seconds: number) => `${seconds.toFixed(seconds < 10 ? 2 : 1)} s`;
 
   const previewDurationLimit = () => {
@@ -484,6 +553,8 @@ function renderBench() {
 
   const clearSdrPreview = () => {
     if (!sdrPreviewCanvas) return;
+    lastSdrPreview = null;
+    report.referenceCompare = null;
     const ctx = sdrPreviewCanvas.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, sdrPreviewCanvas.width, sdrPreviewCanvas.height);
@@ -491,6 +562,7 @@ function renderBench() {
       'Debug preview waiting',
       `${previewModeLabel(previewMode)} from ffmpeg.wasm I420P10`,
     ]);
+    compareLastPreviewWithReference();
   };
 
   const updateSdrPreviewStatus = (items: string[]) => {
@@ -510,6 +582,7 @@ function renderBench() {
     renderer: 'cpu' | 'webgpu' = 'cpu',
   ) => {
     if (!sdrPreviewCanvas) return;
+    lastSdrPreview = preview;
     sdrPreviewCanvas.width = preview.width;
     sdrPreviewCanvas.height = preview.height;
     const ctx = sdrPreviewCanvas.getContext('2d');
@@ -534,6 +607,7 @@ function renderBench() {
         <span>${preview.stats.nonBlackPixels} non-black pixels</span>
       `;
     }
+    compareLastPreviewWithReference();
   };
 
   const renderRawFrameForCurrentMode = async (
@@ -828,6 +902,7 @@ function renderBench() {
     report.gpuUpload = null;
     report.gpuRender = null;
     report.sdrPreview = null;
+    report.referenceCompare = null;
     activeTrack = null;
     activeParsedSource = null;
     report.parseError = null;
@@ -842,6 +917,7 @@ function renderBench() {
     updateGpuUploadMeta(null);
     updateGpuRenderMeta(null);
     updateDecodeMeta(null);
+    updateReferenceMeta(activeReference ? 'Render this video frame to compare with the loaded reference.' : null);
     updateReport();
 
     if (videoMeta) {
@@ -927,6 +1003,23 @@ function renderBench() {
     const track = activeTrack;
     if (!file || !track) return;
     await runFfmpegRawPreview(file, track, selectionVersion, 'Manual ffmpeg.wasm raw-frame probe requested.');
+  });
+
+  referenceFileInput?.addEventListener('change', async () => {
+    const file = referenceFileInput.files?.[0];
+    if (!file) return;
+    report.referenceCompare = null;
+    updateReferenceMeta('Loading reference image.');
+    updateReport();
+    try {
+      activeReference = await loadReferenceImage(file);
+      compareLastPreviewWithReference();
+    } catch (error) {
+      activeReference = null;
+      report.referenceCompare = null;
+      updateReferenceMeta(error instanceof Error ? error.message : String(error));
+    }
+    updateReport();
   });
 
   const requestPreviewAtSelectedTime = async (reason: string) => {
