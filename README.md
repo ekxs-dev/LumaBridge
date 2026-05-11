@@ -29,6 +29,8 @@ The main blockers are:
 - Chrome/WebCodecs needs to expose HEVC Main10 / DV P5 frames as raw `I420P10`, or provide equivalent high-bit-depth raw access.
 - `ffmpeg.wasm` or another browser-side decoder path needs a large performance jump; otherwise the raw path is limited to single-frame, short-clip, and low-FPS diagnostics.
 
+Related Chromium issue: [WebGPU HDR texture support](https://issues.chromium.org/issues/40944011). It tracks HDR and high-bit-depth limitations around `importExternalTexture()` / `copyExternalImageToTexture()`, including precision loss, sRGB/RGBA8 conversion, HDR headroom clamping, and the lack of stable access to original 10-bit/HDR data inside WebGPU.
+
 Without one of those improvements, the practical correct path is a native helper or server-side decode/conversion pipeline, with the browser handling UI, metadata, WebGPU preview, and verification.
 
 ## Current Status

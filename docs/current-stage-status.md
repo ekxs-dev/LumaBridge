@@ -54,6 +54,8 @@
 - `ffmpeg.wasm`、WASM decoder 或浏览器内解码能力有明显性能提升。
 - 项目引入 native helper 或服务端管线，把 HEVC Main10 解码和/或 DV 色彩转换放到浏览器外。
 
+相关 Chromium issue：[WebGPU HDR texture support](https://issues.chromium.org/issues/40944011)。这条 issue 讨论了 `importExternalTexture()` / `copyExternalImageToTexture()` 在 HDR 和 high-bit-depth 输入上的限制，包括精度下降、sRGB/RGBA8 转换、HDR headroom 被钳制，以及开发者无法在 WebGPU 中稳定拿到原始 10-bit/HDR 数据的问题。这也是当前 fast opaque path 只能被标记为速度/可见性预览，而不能被当作正确 DV P5 SDR 路径的核心原因之一。
+
 在这些条件满足前，本阶段的合理定位是：**网页端 DV P5 SDR 研究、调试和单帧验证工具**。
 
 ## 关键判断
