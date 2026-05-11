@@ -8,6 +8,8 @@
 - Reference target intent: SDR BT.709, 100 nit. Current generated/manual FFmpeg `libplacebo` references do not explicitly override target peak, so libplacebo's default `PL_COLOR_SDR_WHITE = 203 nit` and BT.1886-style `color_trc=bt709` mapping are the practical browser comparison target until references are regenerated with an explicit 100 nit policy.
 
 ## Repository Layout
+- `README.md`: English project overview, architecture, setup, testing, and limitations.
+- `README.zh-CN.md`: Chinese project overview, architecture, setup, testing, and limitations.
 - `src/main.ts`: Vite app entry. Home page and `/bench` page are currently implemented here.
 - `src/core/`: TypeScript capability checks, codec helpers, metadata packing, color math, and benchmark summaries.
 - `src/core/rpu-metadata.ts`: Lazy browser adapter for generated Rust/WASM RPU metadata packing.
