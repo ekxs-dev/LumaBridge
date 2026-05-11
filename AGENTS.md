@@ -20,7 +20,6 @@
 - `tests/e2e/`: Playwright smoke/e2e tests.
 - `tests/fixtures/`: Small versioned media fixtures.
 - `tests/references/`: Golden metadata/reference outputs.
-- `docs/current-stage-status.md`: current phase summary, browser-path conclusions, known gaps, and manual testing notes.
 - `scripts/generate-fixtures.mjs`: Regenerates fixtures from `LUMABRIDGE_SOURCE`.
 - `source/`: ignored reference source tree, currently used for local libplacebo study. Do not include it in normal changes.
 
@@ -172,7 +171,7 @@ npm run test:rust
 - [x] Add fast WebGPU external-texture preview for opaque WebCodecs frames when raw I420P10 is unavailable.
 - [x] Start fast WebCodecs/WebGPU previews from the selected `/bench` timestamp instead of always starting at the parsed sample window beginning.
 - [x] Remove failed external-texture recovery modes and keep only opaque RGB speed/visibility preview.
-- [x] Add current-stage Markdown status document.
+- [x] Fold current-stage status notes into the README files.
 - [x] Add explicit WebCodecs raw-access classification so opaque `format === null` frames are labeled preview-only.
 - [x] Replace ffmpeg.wasm realtime fallback seek-per-frame loop with short raw-segment decode chunks.
 - [ ] Implement strict WebCodecs streaming realtime path: demux sample stream -> `VideoDecoder` -> `VideoFrame.copyTo()` -> WebGPU render.
