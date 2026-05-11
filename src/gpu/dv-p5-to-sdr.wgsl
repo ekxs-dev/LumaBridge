@@ -10,7 +10,7 @@ struct FrameParams {
 };
 
 struct DoviParams {
-  // ABI: 840 f32 values packed by src/core/metadata.ts and crates/lumabridge_wasm.
+  // ABI: 840 f32 values packed by src/core/metadata.ts and crates/tonebridge_wasm.
   nonlinearOffset: vec4<f32>,
   nonlinearMatrix0: vec4<f32>,
   nonlinearMatrix1: vec4<f32>,

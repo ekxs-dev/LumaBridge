@@ -90,7 +90,7 @@ async function renderHome() {
     <main class="shell">
       <section class="mast">
         <div>
-          <p class="eyebrow">LumaBridge</p>
+          <p class="eyebrow">ToneBridge</p>
           <h1>DV P5 to SDR verification console</h1>
         </div>
         <a class="link-button" href="${appHref('/bench')}">Open benchmark</a>
@@ -1634,7 +1634,7 @@ function renderBench() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = 'lumabridge-benchmark.json';
+    anchor.download = 'ToneBridge-benchmark.json';
     anchor.click();
     URL.revokeObjectURL(url);
   });

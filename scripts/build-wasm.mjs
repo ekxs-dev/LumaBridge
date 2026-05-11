@@ -5,9 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const crateManifest = resolve(root, 'crates/lumabridge_wasm/Cargo.toml');
-const wasmInput = resolve(root, 'crates/lumabridge_wasm/target/wasm32-unknown-unknown/release/lumabridge_wasm.wasm');
-const outDir = resolve(root, 'src/wasm/lumabridge_wasm');
+const crateManifest = resolve(root, 'crates/tonebridge_wasm/Cargo.toml');
+const wasmInput = resolve(root, 'crates/tonebridge_wasm/target/wasm32-unknown-unknown/release/tonebridge_wasm.wasm');
+const outDir = resolve(root, 'src/wasm/tonebridge_wasm');
 const wasmBindgen = existsSync(resolve(homedir(), '.cargo/bin/wasm-bindgen'))
   ? resolve(homedir(), '.cargo/bin/wasm-bindgen')
   : 'wasm-bindgen';

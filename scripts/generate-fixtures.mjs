@@ -1,10 +1,10 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
-const source = process.env.LUMABRIDGE_SOURCE;
+const source = process.env.TONEBRIDGE_SOURCE;
 
 if (!source) {
-  throw new Error('Set LUMABRIDGE_SOURCE=/path/to/source.mkv before running fixture generation.');
+  throw new Error('Set TONEBRIDGE_SOURCE=/path/to/source.mkv before running fixture generation.');
 }
 
 function run(command, args) {

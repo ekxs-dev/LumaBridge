@@ -19,7 +19,7 @@ pub const COMPACT_DOVI_POLY_COEFFS_OFFSET: usize = 168;
 pub const COMPACT_DOVI_MMR_COEFFS_OFFSET: usize = 264;
 
 #[derive(Debug, Error, PartialEq, Eq)]
-pub enum LumaWasmError {
+pub enum ToneBridgeWasmError {
     #[error("invalid HEVC NAL data")]
     InvalidHevc,
     #[error("invalid RPU data")]
@@ -94,7 +94,7 @@ pub fn nal_type(header_byte: u8) -> u8 {
     (header_byte >> 1) & 0x3f
 }
 
-pub fn parse_annex_b(data: &[u8]) -> Result<Vec<NalUnit>, LumaWasmError> {
+pub fn parse_annex_b(data: &[u8]) -> Result<Vec<NalUnit>, ToneBridgeWasmError> {
     let mut starts = Vec::<(usize, usize)>::new();
     let mut i = 0;
     while i + 3 < data.len() {
@@ -115,7 +115,7 @@ pub fn parse_annex_b(data: &[u8]) -> Result<Vec<NalUnit>, LumaWasmError> {
     }
 
     if starts.is_empty() {
-        return Err(LumaWasmError::InvalidHevc);
+        return Err(ToneBridgeWasmError::InvalidHevc);
     }
 
     let mut units = Vec::new();
@@ -140,9 +140,9 @@ pub fn parse_annex_b(data: &[u8]) -> Result<Vec<NalUnit>, LumaWasmError> {
 pub fn parse_length_prefixed(
     data: &[u8],
     length_size: usize,
-) -> Result<Vec<NalUnit>, LumaWasmError> {
+) -> Result<Vec<NalUnit>, ToneBridgeWasmError> {
     if !(1..=4).contains(&length_size) {
-        return Err(LumaWasmError::InvalidHevc);
+        return Err(ToneBridgeWasmError::InvalidHevc);
     }
 
     let mut units = Vec::new();
@@ -154,7 +154,7 @@ pub fn parse_length_prefixed(
         }
         cursor += length_size;
         if size == 0 || cursor + size > data.len() || cursor + 2 > data.len() {
-            return Err(LumaWasmError::InvalidHevc);
+            return Err(ToneBridgeWasmError::InvalidHevc);
         }
         units.push(NalUnit {
             nal_type: nal_type(data[cursor]),
@@ -181,16 +181,16 @@ pub fn extract_rpu(units: &[NalUnit]) -> Vec<RpuNal> {
         .collect()
 }
 
-pub fn parse_rpu_metadata(rpu_payload: &[u8]) -> Result<CompactDoviMetadata, LumaWasmError> {
+pub fn parse_rpu_metadata(rpu_payload: &[u8]) -> Result<CompactDoviMetadata, ToneBridgeWasmError> {
     if rpu_payload.len() < 2 {
-        return Err(LumaWasmError::InvalidRpu);
+        return Err(ToneBridgeWasmError::InvalidRpu);
     }
 
     let rpu = parse_unspec62_nalu_lenient(rpu_payload)?;
-    compact_metadata_from_dovi_rpu(&rpu).ok_or(LumaWasmError::InvalidRpu)
+    compact_metadata_from_dovi_rpu(&rpu).ok_or(ToneBridgeWasmError::InvalidRpu)
 }
 
-fn parse_unspec62_nalu_lenient(rpu_payload: &[u8]) -> Result<DoviRpu, LumaWasmError> {
+fn parse_unspec62_nalu_lenient(rpu_payload: &[u8]) -> Result<DoviRpu, ToneBridgeWasmError> {
     if let Ok(rpu) = DoviRpu::parse_unspec62_nalu(rpu_payload) {
         return Ok(rpu);
     }
@@ -207,7 +207,7 @@ fn parse_unspec62_nalu_lenient(rpu_payload: &[u8]) -> Result<DoviRpu, LumaWasmEr
         }
     }
 
-    Err(LumaWasmError::InvalidRpu)
+    Err(ToneBridgeWasmError::InvalidRpu)
 }
 
 fn compact_metadata_from_dovi_rpu(rpu: &DoviRpu) -> Option<CompactDoviMetadata> {
@@ -562,7 +562,7 @@ mod tests {
     fn malformed_rpu_returns_error() {
         assert_eq!(
             parse_rpu_metadata(&[]).unwrap_err(),
-            LumaWasmError::InvalidRpu
+            ToneBridgeWasmError::InvalidRpu
         );
     }
 

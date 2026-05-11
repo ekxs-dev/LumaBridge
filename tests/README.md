@@ -1,4 +1,4 @@
-# LumaBridge Test Fixtures
+# ToneBridge Test Fixtures
 
 The fixtures in this directory are intentionally small and versioned.
 
@@ -13,7 +13,7 @@ The fixtures in this directory are intentionally small and versioned.
 Regenerate fixtures with:
 
 ```bash
-LUMABRIDGE_SOURCE=/path/to/source.mkv npm run bench:fixtures
+TONEBRIDGE_SOURCE=/path/to/source.mkv npm run bench:fixtures
 ```
 
 Full WebGPU + HEVC + DV playback E2E should run on a dedicated browser/GPU host. CI smoke tests are capability-aware and must not fail just because the runner lacks HEVC or WebGPU.

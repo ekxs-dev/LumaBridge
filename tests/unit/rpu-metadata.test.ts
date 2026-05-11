@@ -7,7 +7,7 @@ import { parseMp4 } from '../../src/core/mp4';
 import { initRpuMetadataWasmSync, parseRpuMetadataForShader } from '../../src/core/rpu-metadata';
 
 const fixture = path.resolve(__dirname, '../fixtures/dv_p5_short.mp4');
-const wasmFixture = path.resolve(__dirname, '../../src/wasm/lumabridge_wasm/lumabridge_wasm_bg.wasm');
+const wasmFixture = path.resolve(__dirname, '../../src/wasm/tonebridge_wasm/tonebridge_wasm_bg.wasm');
 
 const FIRST_FRAME_FFPROBE_DOVI = {
   sourceMinPq: 7,

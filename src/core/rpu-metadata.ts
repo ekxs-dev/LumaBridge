@@ -1,5 +1,5 @@
-import wasmUrl from '../wasm/lumabridge_wasm/lumabridge_wasm_bg.wasm?url';
-import initWasm, { initSync, parseRpuMetadataPacked } from '../wasm/lumabridge_wasm/lumabridge_wasm';
+import wasmUrl from '../wasm/tonebridge_wasm/tonebridge_wasm_bg.wasm?url';
+import initWasm, { initSync, parseRpuMetadataPacked } from '../wasm/tonebridge_wasm/tonebridge_wasm';
 import { COMPACT_DOVI_FLOAT32_COUNT, COMPACT_DOVI_LAYOUT, createIdentityDoviMetadata, packCompactDoviMetadata } from './metadata';
 
 let wasmReady: Promise<void> | null = null;
@@ -54,10 +54,10 @@ function probeFromPacked(packed: Float32Array, elapsedMs: number, source: RpuMet
     nonlinearOffset: packed.length >= 3 ? [packed[0], packed[1], packed[2]] : null,
     firstPolyCoeffs: packed.length > COMPACT_DOVI_LAYOUT.polyCoeffs + 2
       ? [
-          packed[COMPACT_DOVI_LAYOUT.polyCoeffs],
-          packed[COMPACT_DOVI_LAYOUT.polyCoeffs + 1],
-          packed[COMPACT_DOVI_LAYOUT.polyCoeffs + 2],
-        ]
+        packed[COMPACT_DOVI_LAYOUT.polyCoeffs],
+        packed[COMPACT_DOVI_LAYOUT.polyCoeffs + 1],
+        packed[COMPACT_DOVI_LAYOUT.polyCoeffs + 2],
+      ]
       : null,
     error,
   };

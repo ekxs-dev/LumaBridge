@@ -1,4 +1,4 @@
-export type LumaErrorCode =
+export type ToneBridgeErrorCode =
   | 'WEBGPU_UNAVAILABLE'
   | 'WEBCODECS_UNAVAILABLE'
   | 'HEVC_UNSUPPORTED'
@@ -8,12 +8,12 @@ export type LumaErrorCode =
   | 'UNSUPPORTED_CODEC'
   | 'INVALID_COPY_LAYOUT';
 
-export class LumaBridgeError extends Error {
-  readonly code: LumaErrorCode;
+export class ToneBridgeError extends Error {
+  readonly code: ToneBridgeErrorCode;
 
-  constructor(code: LumaErrorCode, message: string) {
+  constructor(code: ToneBridgeErrorCode, message: string) {
     super(message);
-    this.name = 'LumaBridgeError';
+    this.name = 'ToneBridgeError';
     this.code = code;
   }
 }

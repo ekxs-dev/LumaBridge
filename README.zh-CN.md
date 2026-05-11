@@ -1,13 +1,13 @@
-# LumaBridge
+# ToneBridge
 
 [English README](./README.md)
 
-LumaBridge 是一个网页端 Dolby Vision Profile 5 到 SDR 的预览与验证工具。项目重点不是做一个已经完成的生产级转码器，而是验证网页技术栈能否拿到 raw 10-bit video frame、解析 Dolby Vision RPU metadata，并通过 WebGPU 做可对齐的 SDR 诊断渲染。
+ToneBridge 是一个网页端 Dolby Vision Profile 5 到 SDR 的预览与验证工具。项目重点不是做一个已经完成的生产级转码器，而是验证网页技术栈能否拿到 raw 10-bit video frame、解析 Dolby Vision RPU metadata，并通过 WebGPU 做可对齐的 SDR 诊断渲染。
 
 ## 在线 Demo
 
-- App：<https://ekxs-dev.github.io/LumaBridge/>
-- Benchmark page：<https://ekxs-dev.github.io/LumaBridge/bench/>
+- App：<https://ekxs-dev.github.io/ToneBridge/>
+- Benchmark page：<https://ekxs-dev.github.io/ToneBridge/bench/>
 
 GitHub Pages 版本适合做 capability check 和 UI 测试。GitHub Pages 不能设置 `SharedArrayBuffer` 所需的 COOP/COEP headers，所以线上 demo 可能会降级到 single-thread `ffmpeg.wasm`。如果要使用 `@ffmpeg/core-mt` 的最佳诊断路径，请用本地 `npm run dev`。
 
@@ -235,7 +235,7 @@ Pages 构建命令是：
 npm run build:pages
 ```
 
-这个构建会把 base path 设置为 `/LumaBridge/`，并额外生成静态 `/bench/` 路由副本，方便直接打开 benchmark 页面链接。
+这个构建会把 base path 设置为 `/ToneBridge/`，并额外生成静态 `/bench/` 路由副本，方便直接打开 benchmark 页面链接。
 
 ## 仓库结构
 
@@ -249,10 +249,10 @@ src/core/
 src/gpu/
   raw DV/PQ 诊断和 opaque WebGPU 预览使用的 WGSL shader。
 
-crates/lumabridge_wasm/
+crates/tonebridge_wasm/
   用于 HEVC/RPU parsing 和 compact metadata packing 的 Rust crate。
 
-src/wasm/lumabridge_wasm/
+src/wasm/tonebridge_wasm/
   生成的 wasm-bindgen browser package。
 
 tests/

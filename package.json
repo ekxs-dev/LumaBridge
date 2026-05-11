@@ -1,16 +1,16 @@
 {
-  "name": "lumabridge",
+  "name": "tonebridge",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -p tsconfig.json && vite build",
-    "build:pages": "tsc -p tsconfig.json && vite build --base=/LumaBridge/ && node scripts/create-pages-routes.mjs",
+    "build:pages": "tsc -p tsconfig.json && vite build --base=/ToneBridge/ && node scripts/create-pages-routes.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "test:rust": "cargo test --manifest-path crates/lumabridge_wasm/Cargo.toml",
+    "test:rust": "cargo test --manifest-path crates/tonebridge_wasm/Cargo.toml",
     "build:wasm": "node scripts/build-wasm.mjs",
     "bench:fixtures": "node scripts/generate-fixtures.mjs",
     "ci": "npm run test && npm run build && npm run test:e2e"

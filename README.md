@@ -1,15 +1,15 @@
-# LumaBridge
+# ToneBridge
 
 [中文说明](./README.zh-CN.md)
 
-LumaBridge is a browser-side Dolby Vision Profile 5 to SDR preview and verification tool. The project is focused on testing whether a web stack can expose raw 10-bit video frames, parse Dolby Vision RPU metadata, and render diagnostic SDR output through WebGPU.
+ToneBridge is a browser-side Dolby Vision Profile 5 to SDR preview and verification tool. The project is focused on testing whether a web stack can expose raw 10-bit video frames, parse Dolby Vision RPU metadata, and render diagnostic SDR output through WebGPU.
 
 This is an engineering and verification project, not a finished production transcoder.
 
 ## Live Demo
 
-- App: <https://ekxs-dev.github.io/LumaBridge/>
-- Benchmark page: <https://ekxs-dev.github.io/LumaBridge/bench/>
+- App: <https://ekxs-dev.github.io/ToneBridge/>
+- Benchmark page: <https://ekxs-dev.github.io/ToneBridge/bench/>
 
 The GitHub Pages build is useful for capability checks and UI testing. GitHub Pages does not provide the COOP/COEP headers required for `SharedArrayBuffer`, so the hosted demo may fall back to single-thread `ffmpeg.wasm`. Use local development for the best diagnostic path with `@ffmpeg/core-mt`.
 
@@ -237,7 +237,7 @@ The Pages build uses:
 npm run build:pages
 ```
 
-The workflow uploads `dist/` with the base path set to `/LumaBridge/` and includes a static `/bench/` route copy for direct benchmark-page links.
+The workflow uploads `dist/` with the base path set to `/ToneBridge/` and includes a static `/bench/` route copy for direct benchmark-page links.
 
 ## Repository Layout
 
@@ -251,10 +251,10 @@ src/core/
 src/gpu/
   WGSL shaders for raw DV/PQ diagnostics and opaque WebGPU preview.
 
-crates/lumabridge_wasm/
+crates/tonebridge_wasm/
   Rust crate for HEVC/RPU parsing and compact metadata packing.
 
-src/wasm/lumabridge_wasm/
+src/wasm/tonebridge_wasm/
   Generated wasm-bindgen browser package.
 
 tests/

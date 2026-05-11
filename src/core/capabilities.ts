@@ -1,4 +1,4 @@
-import { LumaBridgeError, type LumaErrorCode } from './errors';
+import { ToneBridgeError, type ToneBridgeErrorCode } from './errors';
 
 export interface RuntimeFeatureSet {
   hasWebGPU: boolean;
@@ -16,12 +16,12 @@ export interface RuntimeFeatureSet {
 
 export interface CapabilityReport {
   ok: boolean;
-  failures: LumaErrorCode[];
+  failures: ToneBridgeErrorCode[];
   warnings: string[];
 }
 
 export function evaluateCapabilities(features: RuntimeFeatureSet): CapabilityReport {
-  const failures: LumaErrorCode[] = [];
+  const failures: ToneBridgeErrorCode[] = [];
   const warnings: string[] = [];
 
   if (!features.hasWebGPU) failures.push('WEBGPU_UNAVAILABLE');
@@ -55,7 +55,7 @@ export function evaluateCapabilities(features: RuntimeFeatureSet): CapabilityRep
 export function assertDvPreviewReady(features: RuntimeFeatureSet): void {
   const report = evaluateCapabilities(features);
   if (!report.ok) {
-    throw new LumaBridgeError(report.failures[0], `LumaBridge capability check failed: ${report.failures.join(', ')}`);
+    throw new ToneBridgeError(report.failures[0], `ToneBridge capability check failed: ${report.failures.join(', ')}`);
   }
 }
 

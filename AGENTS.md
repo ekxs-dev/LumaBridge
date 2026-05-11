@@ -1,7 +1,7 @@
-# LumaBridge Agent Notes
+# ToneBridge Agent Notes
 
 ## Project Overview
-- Project name: `lumabridge`.
+- Project name: `ToneBridge`.
 - Goal: browser-side Dolby Vision Profile 5 to SDR preview/verification tooling.
 - Current state: test infrastructure, benchmark UI, fixtures, Rust/WASM parser skeleton, and WGSL shader skeleton are in place. The full demux -> WebCodecs -> `VideoFrame.copyTo()` -> WebGPU DV P5 pipeline is not complete yet.
 - Primary browser target: Chrome/Edge first.
@@ -14,13 +14,13 @@
 - `src/core/`: TypeScript capability checks, codec helpers, metadata packing, color math, and benchmark summaries.
 - `src/core/rpu-metadata.ts`: Lazy browser adapter for generated Rust/WASM RPU metadata packing.
 - `src/gpu/dv-p5-to-sdr.wgsl`: WGSL shader skeleton for YUV10/DV/PQ/tone mapping work.
-- `crates/lumabridge_wasm/`: Rust crate for HEVC NAL parsing, RPU extraction, metadata packing, and future libdovi integration.
-- `src/wasm/lumabridge_wasm/`: Generated wasm-bindgen browser package for the Rust RPU metadata parser.
+- `crates/tonebridge_wasm/`: Rust crate for HEVC NAL parsing, RPU extraction, metadata packing, and future libdovi integration.
+- `src/wasm/tonebridge_wasm/`: Generated wasm-bindgen browser package for the Rust RPU metadata parser.
 - `tests/unit/`: Vitest unit tests.
 - `tests/e2e/`: Playwright smoke/e2e tests.
 - `tests/fixtures/`: Small versioned media fixtures.
 - `tests/references/`: Golden metadata/reference outputs.
-- `scripts/generate-fixtures.mjs`: Regenerates fixtures from `LUMABRIDGE_SOURCE`.
+- `scripts/generate-fixtures.mjs`: Regenerates fixtures from `TONEBRIDGE_SOURCE`.
 - `source/`: ignored reference source tree, currently used for local libplacebo study. Do not include it in normal changes.
 
 ## Dev Environment Tips
@@ -28,7 +28,7 @@
 - Install JS dependencies with `npm install`.
 - Start the dev server with `npm run dev`.
 - Open the benchmark page at `/bench`.
-- Build the GitHub Pages artifact with `npm run build:pages`; it uses Vite base `/LumaBridge/` and copies `dist/index.html` to `dist/bench/index.html`.
+- Build the GitHub Pages artifact with `npm run build:pages`; it uses Vite base `/ToneBridge/` and copies `dist/index.html` to `dist/bench/index.html`.
 - Vite dev/preview responses intentionally set COOP/COEP/CORP/OAC headers so `crossOriginIsolated === true` and `@ffmpeg/core-mt` can use `SharedArrayBuffer`.
 - Run Rust tests with `npm run test:rust`.
 - Rebuild the generated Rust/WASM browser package with `npm run build:wasm`.
@@ -36,7 +36,7 @@
 - Override the source fixture file with:
 
 ```bash
-LUMABRIDGE_SOURCE=/path/to/input.mkv npm run bench:fixtures
+TONEBRIDGE_SOURCE=/path/to/input.mkv npm run bench:fixtures
 ```
 
 ## Testing Instructions
@@ -84,7 +84,7 @@ npm run test:rust
 - `/bench` also has diagnostic raw-frame preview controls: a time slider/seconds input plus Raw luma, DV P5 base approximation, and PQ SDR approximation modes. Raw luma confirms decoded frame structure; DV P5 base approximation interprets the planes as IPT/PQ before RPU reshape; PQ SDR intentionally shows the incorrect HDR10-style path for comparison.
 - `/bench` shows selected-time Frame/RPU alignment for parsed samples: sample index, timestamp, RPU count, and first RPU NAL bytes. Large MKV files are still prefix-parsed, so seeks beyond that parsed window report unknown/outside until streaming demux is implemented.
 - When selected time is outside the parsed prefix and ffmpeg.wasm raw preview succeeds, `/bench` first tries a one-packet HEVC copy probe (`hevc_mp4toannexb`) at that time, scans the Annex-B packet for RPU NALs, then renders the debug preview with that selected-time RPU metadata when available. Raw-frame decode and packet probe use a hybrid seek (`input -ss` near the target plus output `-ss` for the final 2 seconds) to reduce off-by-keyframe diagnostics, but this is still a diagnostic fallback, not the final demux strategy.
-- Compact DV metadata ABI v2 is 840 `f32` values with explicit `reshapeHeader`, padded pivots, per-piece method/order metadata, polynomial slots, full MMR coefficient slots, and `sourcePq = [sourceMin, sourceMax, level1Max, level1Avg]`. RPU luma pivots from the `dolby_vision` crate are cumulative deltas and must be accumulated before packing. MMR coefficients are packed like libplacebo as `[c0,c1,c2,pad] + [c3,c4,c5,c6]` per order. Keep `src/core/metadata.ts`, `crates/lumabridge_wasm/src/lib.rs`, and `src/gpu/dv-p5-to-sdr.wgsl` aligned.
+- Compact DV metadata ABI v2 is 840 `f32` values with explicit `reshapeHeader`, padded pivots, per-piece method/order metadata, polynomial slots, full MMR coefficient slots, and `sourcePq = [sourceMin, sourceMax, level1Max, level1Avg]`. RPU luma pivots from the `dolby_vision` crate are cumulative deltas and must be accumulated before packing. MMR coefficients are packed like libplacebo as `[c0,c1,c2,pad] + [c3,c4,c5,c6]` per order. Keep `src/core/metadata.ts`, `crates/tonebridge_wasm/src/lib.rs`, and `src/gpu/dv-p5-to-sdr.wgsl` aligned.
 - `src/core/gpu-upload.ts` prepares tightly packed `u32` Y/U/V storage-buffer data plus source/output frame params from I420P10 frames. `/bench` attempts a live WebGPU buffer upload after ffmpeg.wasm raw-frame decode when WebGPU is available.
 - `src/core/rpu-metadata.ts` lazy-loads the generated Rust/WASM parser and converts selected-frame RPU NAL payloads into the 840-f32 compact shader metadata buffer. If parsing fails or no RPU payload is available, `/bench` falls back to identity metadata and reports that explicitly.
 - `src/core/webgpu-render.ts` runs the WGSL compute shader against the ffmpeg.wasm raw frame and reads back an RGBA8 SDR debug preview when WebGPU is available. It now accepts packed RPU metadata, but the WGSL reshape math is still simplified/debug quality.
@@ -94,11 +94,11 @@ npm run test:rust
 - `/bench` records sampled raw Y/U/V min/max/average stats for each ffmpeg.wasm I420P10 frame. If WebGPU returns a black preview while the CPU raw preview is non-black, the page automatically shows the CPU fallback and reports the WebGPU black-frame anomaly instead of leaving the user with a misleading blank/blue canvas.
 - `/bench` also has a "Fast WebCodecs preview" button. It decodes parsed HEVC samples through WebCodecs and draws opaque `VideoFrame`s directly to the SDR preview canvas with `drawImage()`. This is the normal-speed/browser-hardware visibility path, but it is not the strict DV P5 raw path because Chrome currently reports `VideoFrame.format === null` for the user's HEVC sample and does not expose I420P10 planes via `copyTo()`.
 - `/bench` has a "Fast WebGPU opaque preview" button. It decodes through WebCodecs, imports each opaque `VideoFrame` via `GPUDevice.importExternalTexture()`, then renders a fullscreen WebGPU shader from `src/gpu/external-video-to-sdr.wgsl` into a dedicated external-texture canvas. This is the fastest interactive WebGPU entry available when raw `I420P10` is unavailable, but it starts from browser-converted RGB and may already include YUV/RGB/color-space conversion, clamping, or DV-incorrect interpretation. The old `external recovery` matrix/range/flip selector was removed after 8.5s diagnostics showed it cannot recover correct DV P5 base data from opaque Chrome frames. Treat this path as speed/visibility preview only, not reference SDR.
-- Chromium issue [WebGPU HDR texture support](https://issues.chromium.org/issues/40944011) is the relevant browser-platform tracker for HDR/high-bit-depth external texture limits. It covers `importExternalTexture()` / `copyExternalImageToTexture()` behavior such as precision loss, sRGB/RGBA8 conversion, HDR headroom clamping, and the absence of stable original 10-bit/HDR access inside WebGPU. Keep LumaBridge docs clear that opaque external texture previews are not a correctness path until the platform boundary changes.
+- Chromium issue [WebGPU HDR texture support](https://issues.chromium.org/issues/40944011) is the relevant browser-platform tracker for HDR/high-bit-depth external texture limits. It covers `importExternalTexture()` / `copyExternalImageToTexture()` behavior such as precision loss, sRGB/RGBA8 conversion, HDR headroom clamping, and the absence of stable original 10-bit/HDR access inside WebGPU. Keep ToneBridge docs clear that opaque external texture previews are not a correctness path until the platform boundary changes.
 - The fast WebCodecs canvas preview and fast WebGPU opaque preview start from the current `/bench` seconds control. They decode from the nearest previous sync sample, skip pre-roll frames before the requested timestamp, and report both the requested time and the first drawn timestamp. The fast WebGPU opaque preview is paced by `VideoFrame.timestamp` and defaults to up to 720 frames / 30 seconds, but actual duration is limited by the parsed sample window. Large MKV inputs are still prefix-parsed, so the current user sample can only preview the samples available in the 16 MB prefix until streaming Matroska demux is implemented.
 - `/bench` has a "Realtime preview" control for the currently feasible browser path. Today it runs a wall-clock ffmpeg.wasm fallback loop with target FPS clamped to 0.25-4fps and defaulting to 0.25fps for 4K safety, skips ahead when decode/render is slower than target, and records effective FPS/dropped-frame estimates. The fallback now decodes short raw I420P10 segments instead of seeking once per displayed frame: segment size is capped at 12 frames and roughly 96MB raw output, and it can apply an `fps=` filter for low-FPS diagnostics. This is useful for interactive visual tracking, but it is not strict 24fps DV playback. Strict realtime still requires WebCodecs streaming decode plus `VideoFrame.copyTo()` I420P10 frames.
 - `src/core/decoder-adapter.ts` now prefers `@ffmpeg/core-mt` when the runtime is cross-origin isolated, then falls back to single-thread `@ffmpeg/core`. The mt loader uses raw ESM JS Blob URLs for the core and pthread worker so Vite dev HMR imports do not break classic pthread workers. Local Chrome probe on `/bench` reported `crossOriginIsolated: true`, `core: "multi-thread"`, `threaded: true`, and about 130 ms loader time without a media file.
-- GitHub Pages deploys from `.github/workflows/pages.yml` to `https://ekxs-dev.github.io/LumaBridge/`. Pages is useful for hosted capability/UI checks, but it cannot set the COOP/COEP headers required for `SharedArrayBuffer`, so the hosted demo may fall back to single-thread `ffmpeg.wasm`; prefer local `npm run dev` for `@ffmpeg/core-mt` diagnostics.
+- GitHub Pages deploys from `.github/workflows/pages.yml` to `https://ekxs-dev.github.io/ToneBridge/`. Pages is useful for hosted capability/UI checks, but it cannot set the COOP/COEP headers required for `SharedArrayBuffer`, so the hosted demo may fall back to single-thread `ffmpeg.wasm`; prefer local `npm run dev` for `@ffmpeg/core-mt` diagnostics.
 - `/bench` reports WebCodecs raw access explicitly. `strict I420P10 raw path` is the only browser path considered eligible for correct DV P5 SDR. `VideoFrame.format === null` is reported as `preview-only opaque frame`, even when WebCodecs decode itself succeeds, because raw `allocationSize()/copyTo()` planes are unavailable.
 - HEVC WebCodecs codec strings are generated from hvcC with profile-compatibility flags converted into codec-string bit order. `/bench` also probes strict and relaxed HEVC candidates (`hev1`/`hvc1`, full constraints/`B0`) before selecting ffmpeg.wasm fallback, because over-specific constraint bits can make `VideoDecoder.isConfigSupported()` reject an otherwise decodable HEVC Main10 stream.
 - `tests/unit/rpu-metadata.test.ts` now checks compact RPU metadata against FFmpeg Dolby Vision side-data fields for the first fixture frame: matrices, offsets, source PQ, pivots, and polynomial coefficients. If that test is green, the largest libplacebo gap is more likely in WGSL sampling/reshape/tone/gamut mapping or frame/RPU alignment than in Rust metadata packing.
@@ -111,7 +111,7 @@ npm run test:rust
 - Chrome currently rejects `meta` and `target` as WGSL identifiers. Keep shader locals and function parameters away from reserved keywords; `tests/unit/wgsl.test.ts` guards these regressions that broke `/bench` WebGPU rendering.
 
 ## PR / Commit Guidance
-- Suggested title format: `[lumabridge] <Title>`.
+- Suggested title format: `[ToneBridge] <Title>`.
 - Keep changes scoped. Avoid touching `source/` unless the task explicitly concerns the reference source tree.
 - Do not commit generated `dist/`, `node_modules/`, Playwright reports, or Rust `target/`.
 - If changing public test fixtures, update fixture/reference documentation and the golden assertions together.
