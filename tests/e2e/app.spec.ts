@@ -47,8 +47,8 @@ test('benchmark page emits a JSON timing report', async ({ page }) => {
   await expect(page.locator('#ffmpeg-raw-probe')).toBeDisabled();
   await expect(page.locator('#webcodecs-fast-preview')).toBeDisabled();
   await expect(page.locator('#webgpu-external-preview-button')).toBeDisabled();
-  await expect(page.locator('#external-recovery-mode')).toBeDisabled();
-  await expect(page.locator('#external-recovery-mode')).toHaveValue('recover-709-full');
+  await expect(page.locator('#webgpu-external-preview-button')).toHaveText('Fast WebGPU opaque preview');
+  await expect(page.locator('#external-recovery-mode')).toHaveCount(0);
   await expect(page.locator('#external-preview')).toBeAttached();
   await expect(page.locator('#sdr-preview-time')).toBeDisabled();
   await expect(page.getByRole('rowheader', { name: 'copyTo' })).toBeVisible();
@@ -80,7 +80,6 @@ test('benchmark page parses a selected MP4 fixture', async ({ page }) => {
     return Boolean(JSON.parse(report ?? '{}').webCodecs);
   }, { timeout: 20_000 }).toBe(true);
 
-  await expect(page.locator('#external-recovery-mode')).toBeEnabled();
   await expect(page.locator('#sdr-preview-time')).toBeVisible();
   await expect(page.locator('#realtime-toggle')).toBeVisible();
 
@@ -117,7 +116,6 @@ test('benchmark page parses a selected MKV fixture without MP4 moov failure', as
     return Boolean(JSON.parse(report ?? '{}').webCodecs);
   }, { timeout: 20_000 }).toBe(true);
 
-  await expect(page.locator('#external-recovery-mode')).toBeEnabled();
   await expect(page.locator('#sdr-preview-time')).toBeVisible();
   await expect(page.locator('#realtime-toggle')).toBeVisible();
 

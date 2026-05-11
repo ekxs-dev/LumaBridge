@@ -196,8 +196,7 @@ video {
 }
 
 .time-slider,
-.seconds-field,
-.select-field {
+.seconds-field {
   display: grid;
   gap: 8px;
   font-size: 12px;
@@ -206,24 +205,18 @@ video {
 }
 
 .time-slider input,
-.seconds-field input,
-.select-field select {
+.seconds-field input {
   width: 100%;
   min-height: 40px;
   accent-color: #e84f3d;
 }
 
-.seconds-field input,
-.select-field select {
+.seconds-field input {
   border: 2px solid #18201f;
   background: #fffaf0;
   color: #18201f;
   padding: 0 10px;
   font: inherit;
-}
-
-.select-field {
-  margin-top: 12px;
 }
 
 .viewer-meta,

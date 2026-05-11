@@ -27,9 +27,7 @@ import { inspectRpuAnnexBPacket, inspectRpuForSeconds, type RpuFrameSelection } 
 import { parseRpuMetadataForShader, type RpuMetadataProbe } from './core/rpu-metadata';
 import { renderI420P10SdrWithWebGpu, type WebGpuSdrRenderProbe } from './core/webgpu-render';
 import {
-  EXTERNAL_PREVIEW_RECOVERY_MODES,
   renderWebCodecsExternalTexturePreview,
-  type ExternalPreviewRecoveryMode,
   type WebGpuExternalPreviewStats,
 } from './core/webgpu-external-preview';
 import { uploadI420P10ToWebGpu, type WebGpuUploadProbe } from './core/webgpu-upload';
@@ -231,13 +229,7 @@ function renderBench() {
           </dl>
           <button id="ffmpeg-raw-probe" class="secondary-button" type="button" disabled>Render selected SDR frame</button>
           <button id="webcodecs-fast-preview" class="secondary-button" type="button" disabled>Fast WebCodecs preview</button>
-          <button id="webgpu-external-preview-button" class="secondary-button" type="button" disabled>Fast WebGPU SDR preview</button>
-          <label class="select-field" for="external-recovery-mode">
-            <span>external recovery</span>
-            <select id="external-recovery-mode" disabled>
-              ${EXTERNAL_PREVIEW_RECOVERY_MODES.map((mode) => `<option value="${mode}"${mode === 'recover-709-full' ? ' selected' : ''}>${mode}</option>`).join('')}
-            </select>
-          </label>
+          <button id="webgpu-external-preview-button" class="secondary-button" type="button" disabled>Fast WebGPU opaque preview</button>
           <h2 class="subhead">Frame/RPU alignment</h2>
           <dl class="debug-list compact" id="frame-rpu-meta">
             <dt>time</dt><dd>not selected</dd>
@@ -269,7 +261,7 @@ function renderBench() {
           </dl>
         </div>
         <div class="video-frame">
-          <video id="bench-video" controls muted playsinline preload="metadata"></video>
+          <video id="bench-video" muted playsinline preload="metadata"></video>
           <div class="viewer-meta">
             <span>Local preview only</span>
             <span>Benchmark timings remain synthetic until decode pipeline is connected</span>
@@ -344,7 +336,6 @@ function renderBench() {
   const ffmpegRawProbe = document.querySelector<HTMLButtonElement>('#ffmpeg-raw-probe');
   const webCodecsFastPreview = document.querySelector<HTMLButtonElement>('#webcodecs-fast-preview');
   const webGpuExternalPreviewButton = document.querySelector<HTMLButtonElement>('#webgpu-external-preview-button');
-  const externalRecoveryModeSelect = document.querySelector<HTMLSelectElement>('#external-recovery-mode');
   const sdrPreviewCanvas = document.querySelector<HTMLCanvasElement>('#sdr-preview');
   const externalPreviewCanvas = document.querySelector<HTMLCanvasElement>('#external-preview');
   const sdrPreviewMeta = document.querySelector<HTMLElement>('#sdr-preview-meta');
@@ -427,9 +418,9 @@ function renderBench() {
   const updateFrameRpuMeta = (selection: RpuFrameSelection | null, options: { preserveMetadata?: boolean } = {}) => {
     report.frameRpu = selection
       ? {
-          ...selection,
-          firstRpuPayload: selection.firstRpuPayload ? new Uint8Array(selection.firstRpuPayload) : null,
-        }
+        ...selection,
+        firstRpuPayload: selection.firstRpuPayload ? new Uint8Array(selection.firstRpuPayload) : null,
+      }
       : null;
     if (!options.preserveMetadata) {
       report.rpuMetadata = null;
@@ -625,16 +616,8 @@ function renderBench() {
     if (ffmpegRawProbe) ffmpegRawProbe.disabled = manualDisabled;
     if (webCodecsFastPreview) webCodecsFastPreview.disabled = manualDisabled || !activeParsedSource;
     if (webGpuExternalPreviewButton) webGpuExternalPreviewButton.disabled = manualDisabled || !activeParsedSource;
-    if (externalRecoveryModeSelect) externalRecoveryModeSelect.disabled = manualDisabled || !activeParsedSource;
     if (realtimeToggle) realtimeToggle.disabled = !realtimeRunning && (baseDisabled || isRenderingRawPreview);
     if (realtimeFpsInput) realtimeFpsInput.disabled = baseDisabled || isRenderingRawPreview || realtimeRunning;
-  };
-
-  const readExternalRecoveryMode = (): ExternalPreviewRecoveryMode => {
-    const value = externalRecoveryModeSelect?.value;
-    return EXTERNAL_PREVIEW_RECOVERY_MODES.includes(value as ExternalPreviewRecoveryMode)
-      ? value as ExternalPreviewRecoveryMode
-      : 'recover-709-full';
   };
 
   const clampPreviewSeconds = (seconds: number) => {
@@ -1071,19 +1054,19 @@ function renderBench() {
           updateFrameRpuMeta(packetProbe.ok && packetProbe.data
             ? inspectRpuAnnexBPacket(packetProbe.data, packetProbe.seekSeconds)
             : {
-                requestedSeconds: rawSegment.seekSeconds,
-                status: 'invalid-sample',
-                sampleIndex: null,
-                timestampUs: Math.round(rawSegment.seekSeconds * 1_000_000),
-                durationUs: null,
-                isSync: null,
-                rpuNalUnits: 0,
-                firstRpuNalOffset: null,
-                firstRpuNalSize: null,
-                firstRpuNalHex: null,
-                firstRpuPayload: null,
-                error: packetProbe.error ?? 'ffmpeg.wasm HEVC packet probe failed.',
-              });
+              requestedSeconds: rawSegment.seekSeconds,
+              status: 'invalid-sample',
+              sampleIndex: null,
+              timestampUs: Math.round(rawSegment.seekSeconds * 1_000_000),
+              durationUs: null,
+              isSync: null,
+              rpuNalUnits: 0,
+              firstRpuNalOffset: null,
+              firstRpuNalSize: null,
+              firstRpuNalHex: null,
+              firstRpuPayload: null,
+              error: packetProbe.error ?? 'ffmpeg.wasm HEVC packet probe failed.',
+            });
         }
 
         const frameIntervalMs = 1000 / targetFps;
@@ -1232,8 +1215,8 @@ function renderBench() {
       : null;
     const externalPreview = report.webCodecsExternalPreview
       ? report.webCodecsExternalPreview.ok
-        ? `external WebGPU ${report.webCodecsExternalPreview.drawnFrames} frames, ${report.webCodecsExternalPreview.effectiveFps.toFixed(1)} fps, ${report.webCodecsExternalPreview.elapsedMs.toFixed(1)} ms`
-        : `external WebGPU failed: ${report.webCodecsExternalPreview.error ?? 'unknown error'}`
+        ? `opaque WebGPU ${report.webCodecsExternalPreview.drawnFrames} frames, ${report.webCodecsExternalPreview.effectiveFps.toFixed(1)} fps, ${report.webCodecsExternalPreview.elapsedMs.toFixed(1)} ms`
+        : `opaque WebGPU failed: ${report.webCodecsExternalPreview.error ?? 'unknown error'}`
       : null;
     decodeMeta.innerHTML = `
       <dt>adapter</dt><dd>${adapter.selected ?? 'none'} (${adapter.status})</dd>
@@ -1245,7 +1228,7 @@ function renderBench() {
       <dt>raw access</dt><dd>${rawAccessLabel}.${rawAccessReason}</dd>
       <dt>fallback</dt><dd>${fallback}</dd>
       ${fastPreview ? `<dt>fast path</dt><dd>${fastPreview}</dd>` : ''}
-      ${externalPreview ? `<dt>external path</dt><dd>${externalPreview}</dd>` : ''}
+      ${externalPreview ? `<dt>opaque path</dt><dd>${externalPreview}</dd>` : ''}
     `;
   };
 
@@ -1304,8 +1287,7 @@ function renderBench() {
     setPreviewMode('raw-luma');
     if (ffmpegRawProbe) ffmpegRawProbe.textContent = 'Render selected SDR frame';
     if (webCodecsFastPreview) webCodecsFastPreview.textContent = 'Fast WebCodecs preview';
-    if (webGpuExternalPreviewButton) webGpuExternalPreviewButton.textContent = 'Fast WebGPU SDR preview';
-    if (externalRecoveryModeSelect) externalRecoveryModeSelect.value = 'recover-709-full';
+    if (webGpuExternalPreviewButton) webGpuExternalPreviewButton.textContent = 'Fast WebGPU opaque preview';
     writePreviewSeconds(0, false);
     updatePreviewControlsMax();
     setPreviewControlsDisabled(true);
@@ -1489,7 +1471,6 @@ function renderBench() {
     isRenderingRawPreview = true;
     setPreviewControlsDisabled(true);
     showPreviewCanvas('external');
-    const recoveryMode = readExternalRecoveryMode();
     const startSeconds = readPreviewSeconds();
     webGpuExternalPreviewButton.textContent = 'Running WebGPU preview...';
     lastSdrPreview = null;
@@ -1497,10 +1478,9 @@ function renderBench() {
     report.referenceDiagnosis = null;
     updateReferenceMeta('External texture preview has no CPU readback yet; reference comparison is unavailable.');
     updateSdrPreviewStatus([
-      `Fast WebGPU SDR preview running from ${formatPreviewSeconds(startSeconds)}`,
+      `Fast WebGPU opaque preview running from ${formatPreviewSeconds(startSeconds)}`,
       'WebCodecs VideoFrames are imported as WebGPU external textures',
-      `recovery ${recoveryMode}`,
-      'Playing at frame timestamps; approximate color, not libplacebo/reference SDR',
+      'Playing at frame timestamps; browser-converted color, not libplacebo/reference SDR',
     ]);
     updateReport();
     try {
@@ -1509,21 +1489,19 @@ function renderBench() {
         maxSeconds: 30,
         startSeconds,
         realtime: true,
-        recoveryMode,
       });
       report.webCodecsExternalPreview = stats;
       updateDecodeMeta(report.decoderAdapter);
       updateSdrPreviewStatus([
-        stats.ok ? 'Fast WebGPU SDR preview complete' : 'Fast WebGPU SDR preview failed',
+        stats.ok ? 'Fast WebGPU opaque preview complete' : 'Fast WebGPU opaque preview failed',
         `requested ${formatPreviewSeconds(stats.requestedStartSeconds)}${stats.firstDrawnTimestampUs != null ? `, first frame ${(stats.firstDrawnTimestampUs / 1_000_000).toFixed(2)} s` : ''}`,
         `${stats.drawnFrames} drawn / ${stats.decodedFrames} decoded`,
         `${stats.presentationMode} ${stats.effectiveFps.toFixed(1)} fps, ${stats.elapsedMs.toFixed(1)} ms`,
-        `recovery ${stats.recoveryMode}`,
         stats.error ?? 'External texture path is fast but starts from browser-converted opaque RGB',
       ]);
     } finally {
       isRenderingRawPreview = false;
-      webGpuExternalPreviewButton.textContent = 'Fast WebGPU SDR preview';
+      webGpuExternalPreviewButton.textContent = 'Fast WebGPU opaque preview';
       setPreviewControlsDisabled(false);
       updateReport();
     }

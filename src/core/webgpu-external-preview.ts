@@ -10,40 +10,6 @@ import {
   uniqueCodecCandidates,
 } from './webcodecs';
 
-export const EXTERNAL_PREVIEW_RECOVERY_MODES = [
-  'opaque-rgb',
-  'recover-709-full',
-  'recover-2020-full',
-  'recover-709-limited',
-  'recover-2020-limited',
-  'recover-709-full-swap',
-  'recover-2020-full-swap',
-  'recover-709-full-flip-u',
-  'recover-2020-full-flip-u',
-  'recover-709-full-flip-v',
-  'recover-2020-full-flip-v',
-  'recover-709-full-flip-uv',
-  'recover-2020-full-flip-uv',
-] as const;
-
-export type ExternalPreviewRecoveryMode = typeof EXTERNAL_PREVIEW_RECOVERY_MODES[number];
-
-const RECOVERY_MODE_IDS: Record<ExternalPreviewRecoveryMode, number> = {
-  'opaque-rgb': 0,
-  'recover-709-full': 1,
-  'recover-2020-full': 2,
-  'recover-709-limited': 3,
-  'recover-2020-limited': 4,
-  'recover-709-full-swap': 5,
-  'recover-2020-full-swap': 6,
-  'recover-709-full-flip-u': 7,
-  'recover-2020-full-flip-u': 8,
-  'recover-709-full-flip-v': 9,
-  'recover-2020-full-flip-v': 10,
-  'recover-709-full-flip-uv': 11,
-  'recover-2020-full-flip-uv': 12,
-};
-
 export interface WebGpuExternalPreviewStats {
   attempted: boolean;
   ok: boolean;
@@ -61,12 +27,7 @@ export interface WebGpuExternalPreviewStats {
   width: number | null;
   height: number | null;
   presentationMode: 'realtime' | 'fast';
-  recoveryMode: ExternalPreviewRecoveryMode;
   error: string | null;
-}
-
-interface GpuBufferLike {
-  destroy(): void;
 }
 
 interface GpuCanvasContextLike {
@@ -82,10 +43,8 @@ interface GpuDeviceLike {
   queue: {
     submit(commands: unknown[]): void;
     onSubmittedWorkDone(): Promise<void>;
-    writeBuffer(buffer: GpuBufferLike, offset: number, data: ArrayBufferLike, dataOffset: number, size: number): void;
   };
   createBindGroup(descriptor: { layout: unknown; entries: Array<{ binding: number; resource: unknown }> }): unknown;
-  createBuffer(descriptor: { size: number; usage: number }): GpuBufferLike;
   createCommandEncoder(): GpuCommandEncoderLike;
   createRenderPipeline(descriptor: {
     layout: 'auto';
@@ -145,7 +104,6 @@ function baseStats(startedAt: number, codec: string | null): WebGpuExternalPrevi
     width: null,
     height: null,
     presentationMode: 'realtime',
-    recoveryMode: 'recover-709-full',
     error: null,
   };
 }
@@ -163,22 +121,20 @@ export async function renderWebCodecsExternalTexturePreview(
     maxSeconds?: number;
     startSeconds?: number;
     realtime?: boolean;
-    recoveryMode?: ExternalPreviewRecoveryMode;
   } = {},
 ): Promise<WebGpuExternalPreviewStats> {
   const startedAt = performance.now();
   const codec = track.hevcConfig?.codecString ?? null;
-  const recoveryMode = options.recoveryMode ?? 'recover-709-full';
   const requestedStartSeconds = Math.max(0, Number.isFinite(options.startSeconds) ? options.startSeconds ?? 0 : 0);
   const requestedStartTimestampUs = Math.round(requestedStartSeconds * 1_000_000);
   if (typeof VideoDecoder === 'undefined' || typeof EncodedVideoChunk === 'undefined') {
-    return { ...baseStats(startedAt, codec), recoveryMode, requestedStartSeconds, error: 'WebCodecs VideoDecoder is unavailable.' };
+    return { ...baseStats(startedAt, codec), requestedStartSeconds, error: 'WebCodecs VideoDecoder is unavailable.' };
   }
   if (typeof navigator === 'undefined' || !('gpu' in navigator)) {
-    return { ...baseStats(startedAt, codec), recoveryMode, requestedStartSeconds, error: 'WebGPU is unavailable in this environment.' };
+    return { ...baseStats(startedAt, codec), requestedStartSeconds, error: 'WebGPU is unavailable in this environment.' };
   }
   if (!track.hevcConfig) {
-    return { ...baseStats(startedAt, codec), recoveryMode, requestedStartSeconds, error: 'Missing hvcC decoder description.' };
+    return { ...baseStats(startedAt, codec), requestedStartSeconds, error: 'Missing hvcC decoder description.' };
   }
 
   const config = buildVideoDecoderConfig(track);
@@ -186,12 +142,11 @@ export async function renderWebCodecsExternalTexturePreview(
   try {
     supportedConfig = await findSupportedVideoDecoderConfig(config);
   } catch (error) {
-    return { ...baseStats(startedAt, codec), recoveryMode, requestedStartSeconds, error: error instanceof Error ? error.message : String(error) };
+    return { ...baseStats(startedAt, codec), requestedStartSeconds, error: error instanceof Error ? error.message : String(error) };
   }
   if (!supportedConfig) {
     return {
       ...baseStats(startedAt, codec),
-      recoveryMode,
       requestedStartSeconds,
       error: `VideoDecoder does not support any HEVC candidate: ${uniqueCodecCandidates(config.codec).join(', ')}.`,
     };
@@ -200,20 +155,15 @@ export async function renderWebCodecsExternalTexturePreview(
   const gpu = (navigator as Navigator & { gpu: GpuNavigatorLike }).gpu;
   const adapter = await gpu.requestAdapter();
   if (!adapter) {
-    return { ...baseStats(startedAt, supportedConfig.codec), recoveryMode, requestedStartSeconds, error: 'WebGPU adapter request returned null.' };
+    return { ...baseStats(startedAt, supportedConfig.codec), requestedStartSeconds, error: 'WebGPU adapter request returned null.' };
   }
 
   let device: GpuDeviceLike | null = null;
-  const buffers: GpuBufferLike[] = [];
   try {
     device = await adapter.requestDevice();
-    const bufferUsage = (globalThis as { GPUBufferUsage?: Record<string, number> }).GPUBufferUsage;
-    if (!bufferUsage) {
-      return { ...baseStats(startedAt, supportedConfig.codec), recoveryMode, requestedStartSeconds, error: 'GPUBufferUsage is unavailable in this environment.' };
-    }
     const context = canvas.getContext('webgpu') as GpuCanvasContextLike | null;
     if (!context) {
-      return { ...baseStats(startedAt, supportedConfig.codec), recoveryMode, requestedStartSeconds, error: 'WebGPU canvas context is unavailable.' };
+      return { ...baseStats(startedAt, supportedConfig.codec), requestedStartSeconds, error: 'WebGPU canvas context is unavailable.' };
     }
 
     const format = gpu.getPreferredCanvasFormat();
@@ -226,10 +176,6 @@ export async function renderWebCodecsExternalTexturePreview(
       primitive: { topology: 'triangle-list' },
     });
     const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
-    const params = new Uint32Array([RECOVERY_MODE_IDS[recoveryMode], 0, 0, 0]);
-    const paramsBuffer = device.createBuffer({ size: params.byteLength, usage: bufferUsage.UNIFORM | bufferUsage.COPY_DST });
-    device.queue.writeBuffer(paramsBuffer, 0, params.buffer, params.byteOffset, params.byteLength);
-    buffers.push(paramsBuffer);
 
     const realtime = options.realtime ?? true;
     const maxFrames = Math.max(1, Math.floor(options.maxFrames ?? 720));
@@ -266,7 +212,6 @@ export async function renderWebCodecsExternalTexturePreview(
         entries: [
           { binding: 0, resource: externalTexture },
           { binding: 1, resource: sampler },
-          { binding: 2, resource: { buffer: paramsBuffer } },
         ],
       });
       const commandEncoder = device!.createCommandEncoder();
@@ -386,13 +331,11 @@ export async function renderWebCodecsExternalTexturePreview(
       width,
       height,
       presentationMode: realtime ? 'realtime' : 'fast',
-      recoveryMode,
       error: decoderError,
     };
   } catch (error) {
-    return { ...baseStats(startedAt, supportedConfig.codec), recoveryMode, requestedStartSeconds, error: error instanceof Error ? error.message : String(error) };
+    return { ...baseStats(startedAt, supportedConfig.codec), requestedStartSeconds, error: error instanceof Error ? error.message : String(error) };
   } finally {
-    for (const buffer of buffers) buffer.destroy();
     device?.destroy();
   }
 }
