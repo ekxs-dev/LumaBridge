@@ -22,6 +22,7 @@ test('home page shows capability and debug contract', async ({ page }) => {
 
 test('benchmark page emits a JSON timing report', async ({ page }) => {
   await page.goto('/bench');
+  await expect.poll(() => page.evaluate(() => globalThis.crossOriginIsolated)).toBe(true);
   await expect(page.getByText('Pipeline timing report')).toBeVisible();
   await expect(page.getByText('Video preview')).toBeVisible();
   await expect(page.getByText('WebCodecs probe')).toBeVisible();
@@ -73,14 +74,16 @@ test('benchmark page parses a selected MP4 fixture', async ({ page }) => {
   await expect(page.locator('#ffmpeg-raw-probe')).toBeVisible();
   await expect(page.locator('#webcodecs-fast-preview')).toBeVisible();
   await expect(page.locator('#webgpu-external-preview-button')).toBeVisible();
-  await expect(page.locator('#external-recovery-mode')).toBeEnabled();
-  await expect(page.locator('#sdr-preview-time')).toBeVisible();
-  await expect(page.locator('#realtime-toggle')).toBeVisible();
 
   await expect.poll(async () => {
     const report = await page.locator('#report-json').textContent();
     return Boolean(JSON.parse(report ?? '{}').webCodecs);
-  }).toBe(true);
+  }, { timeout: 20_000 }).toBe(true);
+
+  await expect(page.locator('#external-recovery-mode')).toBeEnabled();
+  await expect(page.locator('#sdr-preview-time')).toBeVisible();
+  await expect(page.locator('#realtime-toggle')).toBeVisible();
+
   const report = await page.locator('#report-json').textContent();
   const finalParsed = JSON.parse(report ?? '{}');
   expect(finalParsed.selectedVideo.name).toBe('dv_p5_short.mp4');
@@ -108,6 +111,12 @@ test('benchmark page parses a selected MKV fixture without MP4 moov failure', as
   await expect(page.locator('#ffmpeg-raw-probe')).toBeVisible();
   await expect(page.locator('#webcodecs-fast-preview')).toBeVisible();
   await expect(page.locator('#webgpu-external-preview-button')).toBeVisible();
+
+  await expect.poll(async () => {
+    const report = await page.locator('#report-json').textContent();
+    return Boolean(JSON.parse(report ?? '{}').webCodecs);
+  }, { timeout: 20_000 }).toBe(true);
+
   await expect(page.locator('#external-recovery-mode')).toBeEnabled();
   await expect(page.locator('#sdr-preview-time')).toBeVisible();
   await expect(page.locator('#realtime-toggle')).toBeVisible();

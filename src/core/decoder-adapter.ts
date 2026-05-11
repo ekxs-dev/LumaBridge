@@ -1,8 +1,11 @@
 import { FFFSType } from '@ffmpeg/ffmpeg';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
-import coreUrl from '@ffmpeg/core?url';
-import wasmUrl from '@ffmpeg/core/wasm?url';
+import coreSource from '../../node_modules/@ffmpeg/core/dist/esm/ffmpeg-core.js?raw';
+import wasmUrl from '../../node_modules/@ffmpeg/core/dist/esm/ffmpeg-core.wasm?url';
+import coreMtSource from '../../node_modules/@ffmpeg/core-mt/dist/esm/ffmpeg-core.js?raw';
+import wasmMtUrl from '../../node_modules/@ffmpeg/core-mt/dist/esm/ffmpeg-core.wasm?url';
+import workerMtSource from '../../node_modules/@ffmpeg/core-mt/dist/esm/ffmpeg-core.worker.js?raw';
 import type { Mp4VideoTrack } from './mp4';
 import {
   decodeFirstFrameFromMp4Track,
@@ -13,6 +16,7 @@ import {
 
 export type DecoderAdapterName = 'webcodecs' | 'ffmpeg.wasm';
 export type DecoderAdapterStatus = 'not-run' | 'success' | 'fallback-needed' | 'fallback-available' | 'failed';
+export type FfmpegCoreKind = 'single-thread' | 'multi-thread';
 
 export interface FfmpegRawFrameProbe {
   attempted: boolean;
@@ -60,6 +64,9 @@ export interface FfmpegWasmProbe {
   loaded: boolean;
   mounted: boolean;
   version: string | null;
+  core: FfmpegCoreKind | null;
+  threaded: boolean;
+  crossOriginIsolated: boolean;
   rawFrame: FfmpegRawFrameProbe;
   error: string | null;
   logs: string[];
@@ -77,8 +84,13 @@ export interface DecoderAdapterProbe {
 let ffmpegInstance: FFmpeg | null = null;
 let ffmpegLoadPromise: Promise<FFmpeg> | null = null;
 let ffmpegLogs: string[] = [];
+let ffmpegCoreKind: FfmpegCoreKind | null = null;
+let ffmpegCrossOriginIsolated = false;
 const MEMFS_COPY_LIMIT_BYTES = 128 * 1024 * 1024;
 const FFMPEG_FAST_SEEK_LEAD_SECONDS = 2;
+const FFMPEG_MT_LOAD_TIMEOUT_MS = 12_000;
+const FFMPEG_ST_LOAD_TIMEOUT_MS = 30_000;
+const jsBlobUrls = new Map<string, string>();
 
 function shouldFallbackFromWebCodecs(probe: DecodedFrameProbe): string | null {
   if (!probe.supported) return probe.error ?? 'WebCodecs did not support the HEVC decoder config.';
@@ -90,21 +102,95 @@ function shouldFallbackFromWebCodecs(probe: DecodedFrameProbe): string | null {
   return null;
 }
 
+function isRuntimeCrossOriginIsolated(): boolean {
+  return Boolean(globalThis.crossOriginIsolated);
+}
+
+async function loadFfmpegCore(ffmpeg: FFmpeg, coreKind: FfmpegCoreKind): Promise<void> {
+  if (coreKind === 'multi-thread') {
+    await ffmpeg.load({
+      coreURL: jsBlobUrl(coreMtSource),
+      wasmURL: await toBlobURL(wasmMtUrl, 'application/wasm'),
+      workerURL: jsBlobUrl(workerMtSource),
+    });
+    return;
+  }
+
+  await ffmpeg.load({
+    coreURL: jsBlobUrl(coreSource),
+    wasmURL: await toBlobURL(wasmUrl, 'application/wasm'),
+  });
+}
+
+function jsBlobUrl(source: string): string {
+  const existing = jsBlobUrls.get(source);
+  if (existing) return existing;
+  if (typeof URL.createObjectURL !== 'function') {
+    return `data:text/javascript;charset=utf-8,${encodeURIComponent(source)}`;
+  }
+  const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+  jsBlobUrls.set(source, url);
+  return url;
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = globalThis.setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs} ms.`));
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId != null) globalThis.clearTimeout(timeoutId);
+  });
+}
+
+async function createLoadedFfmpeg(): Promise<FFmpeg> {
+  ffmpegLogs = [];
+  ffmpegCrossOriginIsolated = isRuntimeCrossOriginIsolated();
+  const preferredCore: FfmpegCoreKind = ffmpegCrossOriginIsolated ? 'multi-thread' : 'single-thread';
+  const fallbackCores: FfmpegCoreKind[] = preferredCore === 'multi-thread'
+    ? ['multi-thread', 'single-thread']
+    : ['single-thread'];
+
+  let lastError: unknown = null;
+  for (const coreKind of fallbackCores) {
+    const ffmpeg = new FFmpeg();
+    ffmpeg.on('log', ({ message }) => {
+      ffmpegLogs.push(message);
+      if (ffmpegLogs.length > 10) ffmpegLogs.shift();
+    });
+    try {
+      await withTimeout(
+        loadFfmpegCore(ffmpeg, coreKind),
+        coreKind === 'multi-thread' ? FFMPEG_MT_LOAD_TIMEOUT_MS : FFMPEG_ST_LOAD_TIMEOUT_MS,
+        `ffmpeg.wasm ${coreKind} core load`,
+      );
+      ffmpegCoreKind = coreKind;
+      if (coreKind === 'single-thread' && preferredCore === 'multi-thread' && lastError) {
+        ffmpegLogs.push(`multi-thread core failed, fell back to single-thread: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+      }
+      return ffmpeg;
+    } catch (error) {
+      lastError = error;
+      try {
+        ffmpeg.terminate();
+      } catch {
+        // Ignore terminate failures during load fallback.
+      }
+    }
+  }
+
+  ffmpegCoreKind = null;
+  throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'ffmpeg.wasm core load failed.'));
+}
+
 async function loadFfmpegWasm(): Promise<FFmpeg> {
   if (ffmpegInstance?.loaded) return ffmpegInstance;
   if (ffmpegLoadPromise) return ffmpegLoadPromise;
 
-  ffmpegLogs = [];
-  const ffmpeg = new FFmpeg();
-  ffmpeg.on('log', ({ message }) => {
-    ffmpegLogs.push(message);
-    if (ffmpegLogs.length > 10) ffmpegLogs.shift();
-  });
   ffmpegLoadPromise = (async () => {
-    await ffmpeg.load({
-      coreURL: await toBlobURL(coreUrl, 'text/javascript'),
-      wasmURL: await toBlobURL(wasmUrl, 'application/wasm'),
-    });
+    const ffmpeg = await createLoadedFfmpeg();
     ffmpegInstance = ffmpeg;
     return ffmpeg;
   })();
@@ -632,6 +718,9 @@ export async function probeFfmpegWasmAdapter(
       loaded: ffmpeg.loaded,
       mounted,
       version: '0.12',
+      core: ffmpegCoreKind,
+      threaded: ffmpegCoreKind === 'multi-thread',
+      crossOriginIsolated: ffmpegCrossOriginIsolated,
       rawFrame,
       error: null,
       logs: [...ffmpegLogs],
@@ -643,6 +732,9 @@ export async function probeFfmpegWasmAdapter(
       loaded: false,
       mounted: false,
       version: null,
+      core: ffmpegCoreKind,
+      threaded: false,
+      crossOriginIsolated: isRuntimeCrossOriginIsolated(),
       rawFrame: rawFrameNotAttempted(),
       error: error instanceof Error ? error.message : String(error),
       logs: [...ffmpegLogs],
@@ -654,10 +746,18 @@ export async function probeDecoderAdapters(
   fileBytes: Uint8Array,
   track: Mp4VideoTrack,
   file?: File,
+  options: {
+    onWebCodecs?: (
+      webCodecs: DecodedFrameProbe,
+      rawAccess: WebCodecsRawAccessDecision,
+      fallbackReason: string | null,
+    ) => void;
+  } = {},
 ): Promise<DecoderAdapterProbe> {
   const webCodecs = await decodeFirstFrameFromMp4Track(fileBytes, track);
   const rawAccess = evaluateWebCodecsRawAccess(webCodecs);
   const fallbackReason = shouldFallbackFromWebCodecs(webCodecs);
+  options.onWebCodecs?.(webCodecs, rawAccess, fallbackReason);
   if (!fallbackReason) {
     return {
       selected: 'webcodecs',

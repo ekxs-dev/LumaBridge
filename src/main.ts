@@ -1217,9 +1217,12 @@ function renderBench() {
     const rawAccess = adapter.rawAccess ?? evaluateWebCodecsRawAccess(probe);
     const rawAccessLabel = `${rawAccess.label}${rawAccess.canCorrectDv ? '; correct DV raw path eligible' : '; preview/fallback only'}`;
     const rawAccessReason = rawAccess.reasons[0] ? ` ${rawAccess.reasons[0]}` : '';
+    const ffmpegCore = adapter.ffmpegWasm?.core
+      ? `${adapter.ffmpegWasm.core}${adapter.ffmpegWasm.threaded ? ', threaded' : ''}${adapter.ffmpegWasm.crossOriginIsolated ? ', isolated' : ', not isolated'}`
+      : null;
     const fallback = adapter.fallbackReason
       ? adapter.ffmpegWasm
-        ? `${adapter.fallbackReason}; ffmpeg.wasm ${adapter.ffmpegWasm.available ? `available in ${adapter.ffmpegWasm.elapsedMs.toFixed(1)} ms${adapter.ffmpegWasm.rawFrame.attempted ? `; raw @ ${formatPreviewSeconds(adapter.ffmpegWasm.rawFrame.seekSeconds)} ${adapter.ffmpegWasm.rawFrame.ok ? 'ok' : `failed: ${adapter.ffmpegWasm.rawFrame.error}`}` : ''}` : `failed: ${adapter.ffmpegWasm.error ?? 'unknown error'}`}`
+        ? `${adapter.fallbackReason}; ffmpeg.wasm ${adapter.ffmpegWasm.available ? `available in ${adapter.ffmpegWasm.elapsedMs.toFixed(1)} ms${ffmpegCore ? ` (${ffmpegCore})` : ''}${adapter.ffmpegWasm.rawFrame.attempted ? `; raw @ ${formatPreviewSeconds(adapter.ffmpegWasm.rawFrame.seekSeconds)} ${adapter.ffmpegWasm.rawFrame.ok ? 'ok' : `failed: ${adapter.ffmpegWasm.rawFrame.error}`}` : ''}` : `failed: ${adapter.ffmpegWasm.error ?? 'unknown error'}`}`
         : adapter.fallbackReason
       : 'not needed';
     const fastPreview = report.webCodecsCanvasPreview
@@ -1369,7 +1372,30 @@ function renderBench() {
       updateReport();
       if (track?.hevcConfig) {
         updateDecodeMeta(null, true);
-        report.decoderAdapter = await probeDecoderAdapters(parsed.bytes, track, file);
+        report.decoderAdapter = await probeDecoderAdapters(parsed.bytes, track, file, {
+          onWebCodecs: (webCodecs, rawAccess, fallbackReason) => {
+            if (version !== selectionVersion) return;
+            report.webCodecs = webCodecs;
+            report.decoderAdapter = {
+              selected: fallbackReason ? null : 'webcodecs',
+              status: fallbackReason ? 'fallback-needed' : 'success',
+              webCodecs,
+              rawAccess,
+              ffmpegWasm: null,
+              fallbackReason,
+            };
+            setPreviewControlsDisabled(false);
+            updateDecodeMeta(report.decoderAdapter);
+            updateRealtimeMeta({
+              ...report.realtimePreview,
+              adapter: realtimeAdapterLabel(),
+              note: fallbackReason
+                ? 'WebCodecs raw path is unavailable; checking ffmpeg.wasm fallback.'
+                : 'Strict realtime decode may be possible once streaming VideoFrame.copyTo is enabled.',
+            });
+            updateReport();
+          },
+        });
         if (version !== selectionVersion) return;
         report.webCodecs = report.decoderAdapter.webCodecs;
         setPreviewControlsDisabled(false);

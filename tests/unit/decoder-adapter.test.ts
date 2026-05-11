@@ -79,8 +79,11 @@ vi.mock('@ffmpeg/util', () => ({
   fetchFile: vi.fn(),
 }));
 
-vi.mock('@ffmpeg/core?url', () => ({ default: '/mock/ffmpeg-core.js' }));
-vi.mock('@ffmpeg/core/wasm?url', () => ({ default: '/mock/ffmpeg-core.wasm' }));
+vi.mock('../../node_modules/@ffmpeg/core/dist/esm/ffmpeg-core.js?raw', () => ({ default: 'export default function mockCore() {}' }));
+vi.mock('../../node_modules/@ffmpeg/core/dist/esm/ffmpeg-core.wasm?url', () => ({ default: '/mock/ffmpeg-core.wasm' }));
+vi.mock('../../node_modules/@ffmpeg/core-mt/dist/esm/ffmpeg-core.js?raw', () => ({ default: 'export default function mockCoreMt() {}' }));
+vi.mock('../../node_modules/@ffmpeg/core-mt/dist/esm/ffmpeg-core.wasm?url', () => ({ default: '/mock/ffmpeg-core-mt.wasm' }));
+vi.mock('../../node_modules/@ffmpeg/core-mt/dist/esm/ffmpeg-core.worker.js?raw', () => ({ default: 'self.onmessage = () => {};' }));
 
 describe('decoder adapter', () => {
   beforeEach(() => {
@@ -129,6 +132,8 @@ describe('decoder adapter', () => {
     expect(probe.status).toBe('fallback-available');
     expect(probe.fallbackReason).toContain('I420P10');
     expect(probe.ffmpegWasm?.available).toBe(true);
+    expect(probe.ffmpegWasm?.core).toBe('single-thread');
+    expect(probe.ffmpegWasm?.threaded).toBe(false);
   });
 
   it('passes a selected seek time to the ffmpeg.wasm raw-frame probe', async () => {

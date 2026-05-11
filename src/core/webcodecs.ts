@@ -70,6 +70,18 @@ export function sampleDurationUs(sample: Mp4Sample, timescale: number): number {
   return Math.round((sample.duration / timescale) * 1_000_000);
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = globalThis.setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs} ms.`));
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId != null) globalThis.clearTimeout(timeoutId);
+  });
+}
+
 export function buildVideoDecoderConfig(track: Mp4VideoTrack): VideoDecoderConfig {
   if (!track.hevcConfig) {
     throw new Error('HEVC decoder configuration is missing hvcC.');
@@ -349,6 +361,7 @@ export async function decodeFirstFrameFromMp4Track(
   fileBytes: Uint8Array,
   track: Mp4VideoTrack,
   maxSamples = 12,
+  timeoutMs = 5_000,
 ): Promise<DecodedFrameProbe> {
   const startedAt = performance.now();
   const codec = track.hevcConfig?.codecString ?? null;
@@ -437,7 +450,7 @@ export async function decodeFirstFrameFromMp4Track(
     for (const sample of track.samples.slice(0, maxSamples)) {
       decoder.decode(createEncodedVideoChunk(fileBytes, sample, track));
     }
-    await decoder.flush();
+    await withTimeout(decoder.flush(), timeoutMs, 'VideoDecoder.flush()');
     await Promise.all(copyTasks);
   } catch (error) {
     decoderError = error instanceof Error ? error.message : String(error);
