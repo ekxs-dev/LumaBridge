@@ -6,6 +6,7 @@
 - Current state: test infrastructure, benchmark UI, fixtures, Rust/WASM parser skeleton, and WGSL shader skeleton are in place. The full demux -> WebCodecs -> `VideoFrame.copyTo()` -> WebGPU DV P5 pipeline is not complete yet.
 - Primary browser target: Chrome/Edge first.
 - Reference target intent: SDR BT.709, 100 nit. Current generated/manual FFmpeg `libplacebo` references do not explicitly override target peak, so libplacebo's default `PL_COLOR_SDR_WHITE = 203 nit` and BT.1886-style `color_trc=bt709` mapping are the practical browser comparison target until references are regenerated with an explicit 100 nit policy.
+- Acknowledge [libplacebo](https://libplacebo.org/) as a key technical reference for rendering architecture, HDR tone mapping, color management, and reference SDR comparison. ToneBridge remains an independent browser-side research/diagnostic tool, not a libplacebo replacement.
 
 ## Repository Layout
 - `README.md`: English project overview, architecture, setup, testing, and limitations.

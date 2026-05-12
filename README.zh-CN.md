@@ -192,6 +192,10 @@ reshape diagnostics
 
 下一阶段如果继续做正确性，重点应该放在 libplacebo 风格的 post-DV color map 和 gamut behavior。
 
+## 致谢
+
+ToneBridge 把 [libplacebo](https://libplacebo.org/) 作为重要技术参考，尤其是 video rendering architecture、HDR tone mapping、color management 和 SDR reference comparison 相关行为。当前诊断目标、reference 对齐方式和差距分析都参考了 libplacebo 的 renderer 与 tone/color mapping 模型。ToneBridge 是独立的浏览器端研究工具，不是 libplacebo 的替代品。
+
 ## 环境要求
 
 - Node.js 18 或更新版本。
